@@ -124,9 +124,12 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
    string values as delivered (trimmed). Content hash: sha256 of all delivered columns in a fixed
    order. Classify each row as `new`, `modified` (same key, different hash) or `unchanged`. Do not
    collapse genuine repeated observations that differ in key.
-3. If there are no new or modified rows: record the counts, set status `no_change`, stop. CrewAI
-   is not imported.
-4. Affected set = distinct (cy, cx, year, month) touched by new or modified rows.
+   Inserting or modifying a row sets `raw_detections.needs_processing = true`. Only a successful
+   promotion (§8) clears it, inside the promotion transaction. Rows from a failed, held or rejected
+   run therefore stay pending and are picked up by the next run.
+3. If there are no new or modified rows **and** no pending rows (`needs_processing`): record the
+   counts, set status `no_change`, stop. CrewAI is not imported.
+4. Affected set = distinct (cy, cx, year, month) of all pending rows.
 5. Run the CrewAI flow (§7) over these deterministic stages: filter → aggregate affected
    cell-months → harmonize with the frozen calibration → partial-month and anomaly fields →
    hard gates → drift monitor. Write results to staging under the job id.
@@ -168,13 +171,18 @@ Tables (names fixed; columns are a minimum; phase briefs may add more):
 | `job_steps` | job id, step name, status, started/finished, summary JSON |
 | `llm_attempts` | job id, step, model, outcome, latency, error class |
 | `firms_fetches` | source, window, fetched_at, sha256, rows, raw path, availability snapshot |
-| `raw_detections` | natural key (unique), content hash, all delivered columns, product (`NRT`/`SP`), first_seen/last_seen fetch |
+| `firms_availability` | job id, source, min_date, max_date (one snapshot per poll) |
+| `raw_detections` | natural key (unique), content hash, all delivered columns, product (`NRT`/`SP`), first_seen/last_seen fetch, `needs_processing` |
 | `sensor_day_coverage` | source, date, status (`available`/`missing`/`unknown`) |
 | `calibration_versions` | id, status, k table ref, r factors, mask version, validation report JSON, approved_at |
 | `dataset_versions` | id, parent id, job id, calibration version, status (`approved`/`superseded`), created/approved, summary |
 | `cell_month` | **approved** rows: cy, cx, year, month, modis, viirs_ref, harmonized, k, support, days, is_partial, quality_flags, dataset_version_id |
 | `cell_month_staging` | same columns + job id |
 | `cell_month_history` | previous approved values, replaced_by_version, for rollback |
+
+Table ownership: Phase 1 creates `schedules`, `processing_jobs`, `job_steps`, `firms_fetches`,
+`firms_availability` and `raw_detections`. Phase 4 creates the rest. Every schema change is an
+Alembic migration under `backend/migrations/`.
 
 Promotion runs in one transaction:
 1. Copy the approved rows being replaced into `cell_month_history`.
@@ -200,6 +208,9 @@ Bootstrap: approved dataset version 1 and calibration version 1 are loaded from 
 - Missed runs collapse: after downtime, one run happens and `next_run_at = now + interval`. There
   is no backlog storm.
 - Interval: `FIRMS_POLL_INTERVAL_HOURS` (default 3), read at startup and written to `schedules`.
+- `monthly_reconcile` runs on `RECONCILE_DAY_OF_MONTH` (default 5) at 03:00 UTC. Its schedule row
+  exists from Phase 1 but stays disabled until its handler lands in Phase 2.
+- Handlers are registered per kind. A due kind with no handler is skipped and logged, never run.
 
 ## 10. API
 
