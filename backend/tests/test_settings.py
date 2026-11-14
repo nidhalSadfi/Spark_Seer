@@ -10,7 +10,9 @@ from settings import DEFAULT_REGION_BBOX, Settings, SettingsError
 ENV_VARS = ("DATABASE_URL", "FIRMS_MAP_KEY", "FIRMS_MAP_KEY_1", "FIRMS_POLL_INTERVAL_HOURS", "FIRMS_BBOX",
             "FIRMS_MAX_BACKFILL_DAYS", "FIRMS_RAW_DIR", "WORKER_LEASE_SECONDS", "WORKER_TICK_SECONDS",
             "RECONCILE_DAY_OF_MONTH", "COUNTRY_BOUNDARY_FILE", "STATIC_MASK_FILE", "DRIFT_WARN_PCT",
-            "DRIFT_MIN_COUNT")
+            "DRIFT_MIN_COUNT", "OPENROUTER_API_KEY", "OPENROUTER_MODELS", "OPENROUTER_BASE_URL",
+            "OPENROUTER_TIMEOUT_S", "OPENROUTER_RETRIES", "REVIEW_DEADLINE_S", "REVIEW_SUMMARY_MAX_CHARS")
+FAKE_OPENROUTER_KEY = "sk-or-v1-0000000000000000000000000000000000000000000000000000000000fake"
 
 
 @pytest.fixture(autouse=True)
@@ -111,4 +113,65 @@ def test_secrets_not_in_repr(monkeypatch):
 def test_invalid_values_name_the_variable(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(SettingsError, match=name):
+        Settings.from_env()
+
+
+def test_review_defaults():
+    s = Settings.from_env()
+    # No model list by default (spec D5): the AI review is disabled and crewai never imported.
+    assert s.openrouter_api_key is None and s.openrouter_models == ()
+    assert s.openrouter_base_url == "https://openrouter.ai/api/v1"
+    assert (s.openrouter_timeout_s, s.openrouter_retries) == (60.0, 1)
+    assert (s.review_deadline_s, s.review_summary_max_chars) == (300.0, 8000)
+
+
+def test_review_env_overrides(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_OPENROUTER_KEY)
+    monkeypatch.setenv("OPENROUTER_MODELS", " vendor/a , ,vendor/b:free,, ")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "http://localhost:8080/v1")
+    monkeypatch.setenv("OPENROUTER_TIMEOUT_S", "12.5")
+    monkeypatch.setenv("OPENROUTER_RETRIES", "0")
+    monkeypatch.setenv("REVIEW_DEADLINE_S", "90")
+    monkeypatch.setenv("REVIEW_SUMMARY_MAX_CHARS", "1000")
+    s = Settings.from_env()
+    assert s.openrouter_models == ("vendor/a", "vendor/b:free")   # order kept, blanks dropped
+    assert s.openrouter_api_key == FAKE_OPENROUTER_KEY and s.openrouter_base_url == "http://localhost:8080/v1"
+    assert (s.openrouter_timeout_s, s.openrouter_retries, s.review_deadline_s, s.review_summary_max_chars) == \
+        (12.5, 0, 90.0, 1000)
+
+
+def test_only_commas_means_no_models(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_MODELS", " , ,")
+    assert Settings.from_env().openrouter_models == ()
+
+
+def test_openrouter_key_not_in_repr(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_OPENROUTER_KEY)
+    monkeypatch.setenv("OPENROUTER_MODELS", "vendor/a")
+    assert FAKE_OPENROUTER_KEY not in repr(Settings.from_env())
+
+
+@pytest.mark.parametrize("name,value", [
+    ("OPENROUTER_TIMEOUT_S", "0"),
+    ("OPENROUTER_TIMEOUT_S", "inf"),
+    ("OPENROUTER_TIMEOUT_S", "soon"),
+    ("OPENROUTER_RETRIES", "-1"),
+    ("OPENROUTER_RETRIES", "1.5"),
+    ("OPENROUTER_BASE_URL", "openrouter.ai/api/v1"),
+    ("REVIEW_DEADLINE_S", "0"),
+    ("REVIEW_DEADLINE_S", "nan"),
+    ("REVIEW_DEADLINE_S", "-5"),
+    ("REVIEW_SUMMARY_MAX_CHARS", "999"),
+    ("REVIEW_SUMMARY_MAX_CHARS", "8k"),
+])
+def test_invalid_review_values_name_the_variable(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(SettingsError, match=name):
+        Settings.from_env()
+
+
+def test_models_without_a_key_are_a_clear_error(monkeypatch):
+    # Otherwise every attempt would fail and every run would publish unreviewed (D3).
+    monkeypatch.setenv("OPENROUTER_MODELS", "vendor/a")
+    with pytest.raises(SettingsError, match="OPENROUTER_API_KEY"):
         Settings.from_env()

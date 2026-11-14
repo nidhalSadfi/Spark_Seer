@@ -46,9 +46,31 @@ pytest -m pg                      # PostgreSQL tests against TEST_DATABASE_URL (
 ```
 
 The worker polls NASA FIRMS (`firms_poll`, every `FIRMS_POLL_INTERVAL_HOURS`) and stores raw
-detections; see `docs/processing/ARCHITECTURE.md`. Only the `db` service exists for now; `api` and
+detections; see `docs/processing/ARCHITECTURE.md`. It needs `pip install -r requirements-worker.txt`
+(requirements.txt plus CrewAI, pinned to 1.15.x); the API keeps using `requirements.txt` and never
+imports CrewAI. `requirements-dev.txt` includes the worker requirements, so `pytest` covers both. Only the `db` service exists for now; `api` and
 `worker` services arrive in later phases. `docker/initdb/` creates the `emberguard_test` database
 when the db volume is first initialised.
+
+## AI review (CrewAI + OpenRouter)
+
+`backend/worker/review.py` runs the processing stages as a CrewAI flow, then three reviewer agents
+whose verdict can only downgrade the deterministic hard gates (spec §7). Configure it in `.env`:
+
+- `OPENROUTER_API_KEY`: required when a model list is set.
+- `OPENROUTER_MODELS`: comma-separated OpenRouter model ids, tried in order. **Empty (the default)
+  disables the review**: runs are decided by the hard gates alone (`ai_review = "disabled"`) and
+  CrewAI is not even imported.
+- `OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT_S`, `OPENROUTER_RETRIES`: endpoint, per-request
+  timeout and HTTP retries.
+- `REVIEW_DEADLINE_S`: time budget for the whole review; no model is started after it. If every
+  model fails, a run that passed the gates is published with `ai_review = "unavailable"`.
+- `REVIEW_SUMMARY_MAX_CHARS`: cap on each summary an agent is shown.
+
+Before importing CrewAI the worker switches off its telemetry, tracing, version check and `.env`
+loading, and points its storage at `CREWAI_STORAGE_DIR` (default: a per-user directory under the
+system temp dir), so CrewAI writes nothing under `$HOME`. Phase 3 is not wired into `firms_poll`
+yet; tests use stub models only.
 
 ## Processing science
 

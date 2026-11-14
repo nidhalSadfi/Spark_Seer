@@ -1,0 +1,4 @@
+-r requirements.txt
+# Worker only (spec §7): the API never installs or imports it (I1). Pinned below 1.16 because
+# worker/llm.py relies on CrewAI 1.15 internals (rate-limit retry guard, home-directory paths).
+crewai>=1.15.41,<1.16

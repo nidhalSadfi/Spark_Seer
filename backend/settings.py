@@ -19,6 +19,7 @@ Bbox = tuple[float, float, float, float]  # (west, south, east, north), degrees
 
 # Spec §1: Tunisia + Algeria north of 34°N padded to 0.5° cells (one 60° FIRMS tile).
 DEFAULT_REGION_BBOX: Bbox = (-2.5, 34.0, 11.5, 38.0)
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class SettingsError(ValueError):
@@ -41,6 +42,14 @@ class Settings:
     static_mask_file: Path | None = None
     drift_warn_pct: float = 40.0
     drift_min_count: float = 50.0
+    # Review (spec §7): an empty model list disables the AI review (crewai is then never imported).
+    openrouter_api_key: str | None = field(default=None, repr=False)
+    openrouter_models: tuple[str, ...] = ()
+    openrouter_base_url: str = DEFAULT_OPENROUTER_BASE_URL
+    openrouter_timeout_s: float = 60.0
+    openrouter_retries: int = 1
+    review_deadline_s: float = 300.0
+    review_summary_max_chars: int = 8000
 
     def __post_init__(self) -> None:
         _check(self.firms_poll_interval_hours > 0 and math.isfinite(self.firms_poll_interval_hours),
@@ -59,6 +68,19 @@ class Settings:
                "must be a number > 0", self.drift_warn_pct)
         _check(self.drift_min_count >= 0 and math.isfinite(self.drift_min_count), "DRIFT_MIN_COUNT",
                "must be a number >= 0", self.drift_min_count)
+        # A model list without a key would only fail every attempt and publish unreviewed (D3).
+        _check(not self.openrouter_models or bool(self.openrouter_api_key), "OPENROUTER_API_KEY",
+               "must be set when OPENROUTER_MODELS is not empty", "")
+        _check(self.openrouter_base_url.startswith(("https://", "http://")), "OPENROUTER_BASE_URL",
+               "must be an http(s) URL", self.openrouter_base_url)
+        _check(self.openrouter_timeout_s > 0 and math.isfinite(self.openrouter_timeout_s), "OPENROUTER_TIMEOUT_S",
+               "must be a number > 0", self.openrouter_timeout_s)
+        _check(self.openrouter_retries >= 0, "OPENROUTER_RETRIES", "must be an integer >= 0", self.openrouter_retries)
+        _check(self.review_deadline_s > 0 and math.isfinite(self.review_deadline_s), "REVIEW_DEADLINE_S",
+               "must be a number > 0", self.review_deadline_s)
+        # Below ~1000 characters a summary cannot even hold the gate results.
+        _check(self.review_summary_max_chars >= 1000, "REVIEW_SUMMARY_MAX_CHARS", "must be an integer >= 1000",
+               self.review_summary_max_chars)
 
     @property
     def firms_poll_interval(self) -> timedelta:
@@ -94,6 +116,19 @@ class Settings:
             kw["drift_warn_pct"] = _number("DRIFT_WARN_PCT", v, float)
         if (v := _get("DRIFT_MIN_COUNT")) is not None:
             kw["drift_min_count"] = _number("DRIFT_MIN_COUNT", v, float)
+        kw["openrouter_api_key"] = _get("OPENROUTER_API_KEY")
+        if (v := _get("OPENROUTER_MODELS")) is not None:
+            kw["openrouter_models"] = tuple(m.strip() for m in v.split(",") if m.strip())
+        if (v := _get("OPENROUTER_BASE_URL")) is not None:
+            kw["openrouter_base_url"] = v
+        if (v := _get("OPENROUTER_TIMEOUT_S")) is not None:
+            kw["openrouter_timeout_s"] = _number("OPENROUTER_TIMEOUT_S", v, float)
+        if (v := _get("OPENROUTER_RETRIES")) is not None:
+            kw["openrouter_retries"] = _number("OPENROUTER_RETRIES", v, int)
+        if (v := _get("REVIEW_DEADLINE_S")) is not None:
+            kw["review_deadline_s"] = _number("REVIEW_DEADLINE_S", v, float)
+        if (v := _get("REVIEW_SUMMARY_MAX_CHARS")) is not None:
+            kw["review_summary_max_chars"] = _number("REVIEW_SUMMARY_MAX_CHARS", v, int)
         return cls(**kw)
 
 
