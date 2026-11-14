@@ -36,4 +36,6 @@ def main(out_dir: Path) -> None:
 
 if __name__ == "__main__":
     os.environ.setdefault("EMBER_DATA", str(ROOT / "data" / "harmonized.parquet"))
+    if not os.path.exists(core.data_path()):
+        sys.exit(f"No data at {core.data_path()}: run pipeline/calibrate.py first (or set EMBER_DATA).")
     main(ROOT / "web" / "backup")

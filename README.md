@@ -6,6 +6,9 @@ A harmonized MODIS + VIIRS burning-activity calendar, built for the NASA Space A
 ## Run it
 
 ```bash
+# Use a virtualenv: a system Python with old numpy breaks pyarrow ("Unable to find a usable engine").
+python3 -m venv .venv            # Debian/Ubuntu: needs `sudo apt install python3-venv` first
+source .venv/bin/activate        # gives you `python`, `pip`, `uvicorn` from the venv
 pip install -r requirements.txt
 # 1. Put unzipped FIRMS yearly country CSVs (MODIS C6.1 + VIIRS S-NPP 375 m) under data/raw/
 python pipeline/ingest.py data/raw data/cells.parquet 34   # 34 = keep north of 34N (drops Saharan gas flares)
