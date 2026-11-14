@@ -25,10 +25,13 @@ def write(path: Path, obj) -> None:
 
 
 def main(out_dir: Path) -> None:
+    # Build everything first, so a missing data file never leaves a half-written backup folder.
+    files = {f"{a['id']}.json": core.calendar_for_bbox(tuple(a["bbox"]), START, END)
+             for a in core.get_areas()}
+    files["validation.json"] = core.get_validation(include_series=True)
     out_dir.mkdir(parents=True, exist_ok=True)
-    for area in core.get_areas():
-        write(out_dir / f"{area['id']}.json", core.calendar_for_bbox(tuple(area["bbox"]), START, END))
-    write(out_dir / "validation.json", core.get_validation(include_series=True))
+    for name, obj in files.items():
+        write(out_dir / name, obj)
 
 
 if __name__ == "__main__":
