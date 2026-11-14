@@ -48,9 +48,63 @@ Notes:
 - If the server dies mid-demo, the front end can read `web/backup/*.json` (same JSON as the API).
   Run `python scripts/export_backups.py` once the real data is in place, then commit `web/backup/`.
 
-## API contract (front end builds against `web/mock_calendar.json`)
+## API
 
-`GET /calendar?bbox=minLon,minLat,maxLon,maxLat&start=YYYY&end=YYYY` (example values are synthetic)
+Base URL: `http://localhost:8000` locally, `https://<service>.onrender.com` on Render. All core
+endpoints are `GET` and return JSON. CORS allows any origin for `GET` and `POST`. FastAPI serves
+interactive docs at `/docs`.
+
+Errors return `{"detail": "..."}`: **400** for bad parameters, **503** when a data file is missing
+(the message names the file).
+
+Contract: the front end builds against `web/mock_calendar.json`. Existing fields are never renamed
+or removed, only added to. All example values below are synthetic or illustrative.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness, plus which data file is loaded and how many rows it has |
+| `GET /areas` | Named demo areas (ids for `/calendar?area=`) |
+| `GET /calendar` | Monthly harmonized burning-activity calendar for a bbox or an area |
+| `GET /validation` | Held-out validation report of the MODIS->VIIRS harmonization |
+
+### `GET /health`
+
+No parameters.
+
+```json
+{"status": "ok", "data_file": "data/harmonized.parquet", "rows": 48210}
+```
+
+`rows` counts the rows in `harmonized.parquet` (cell x month with detections). If the file is
+missing the response is a 503.
+
+### `GET /areas`
+
+No parameters. Read from `data/areas.json`. The boxes are approximate and will be refined.
+
+```json
+{"areas": [
+  {"id": "bizerte", "name": "Bizerte", "bbox": [9.0, 36.8, 10.3, 37.4]},
+  {"id": "nw_tunisia", "name": "Northwest Tunisia", "bbox": [8.3, 36.2, 9.2, 37.0]},
+  {"id": "kabylie", "name": "Kabylie", "bbox": [3.7, 36.3, 5.2, 37.0]},
+  {"id": "ne_algeria", "name": "Northeast Algeria", "bbox": [7.0, 36.4, 8.6, 37.0]}
+]}
+```
+
+`bbox` is `[minLon, minLat, maxLon, maxLat]` in decimal degrees.
+
+### `GET /calendar`
+
+| Parameter | Required | Default | Meaning |
+|---|---|---|---|
+| `bbox` | one of `bbox` / `area` | | `minLon,minLat,maxLon,maxLat`, e.g. `9.0,36.8,10.3,37.4` |
+| `area` | one of `bbox` / `area` | | an `id` from `/areas`, e.g. `bizerte` |
+| `start` | no | `2001` | first year |
+| `end` | no | `2025` | last year (inclusive) |
+
+It returns 400 when neither or both of `bbox` and `area` are given, when the area id is unknown,
+or when the bbox is malformed. Examples: `/calendar?area=bizerte&start=2003&end=2025`,
+`/calendar?bbox=8.0,35.0,11.0,37.5`.
 
 ```json
 {
@@ -73,8 +127,47 @@ Notes:
   `low_confidence` (pre-2012 month whose ratio rests on < 30 MODIS detections), or `normal`.
 - `support`: MODIS training detections behind the ratio for that calendar month.
 - `critical_months`: months whose median activity is in the top quarter of the year.
+- `months` is a full grid: 12 entries per year from `start` to `end`. Months with no detections
+  are zeros.
+- Every 0.5 degree grid cell that overlaps (or touches) the bbox is included, so the covered area can be
+  slightly larger than the bbox. `meta.cells` is the number of cells with detections.
+- Optional fields `low`, `high`, `MODIS_days`, `VIIRS_days` appear **only if**
+  `harmonized.parquet` has those columns. The API never computes them. They are summed over the
+  area's cells like the counts (so `*_days` is a total over cells, not calendar days), and they
+  are `null` for a month where any cell lacks the value.
+- An area with no detections returns
+  `{"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}`.
 
 `web/mock_calendar.json` is **synthetic** data for UI work only. Never show it as real results.
+
+### `GET /validation`
+
+No parameters. This is the report `pipeline/calibrate.py` writes to
+`data/harmonized_validation.json`: fit on the training years, predict VIIRS from MODIS on the
+held-out test years, compared at region x month level.
+
+```json
+{"train_years": [2012, 2019], "test_years": [2020, 2021],
+ "error_pct_uncorrected": 66.4, "error_pct_global_ratio": 23.1,
+ "error_pct_cell_month_ratio": 20.9, "k_global": 3.04, "test_months": 24}
+```
+
+- `error_pct_*`: mean absolute monthly error as a % of the mean observed VIIRS count. The three
+  variants are raw MODIS, one global ratio, and the per-cell-month ratio used by the API.
+- `k_global`: overall VIIRS/MODIS ratio over the training years. `test_months`: months scored.
+- `series` (per-month detail) is included **only if** the file contains one. `calibrate.py`
+  does not write it today. `/calendar`'s `meta.validation` always leaves `series` out.
+
+### Teammate routers
+
+`api/passport.py` and `api/weather.py` are mounted automatically when they exist. Each must export
+`router` (a FastAPI `APIRouter`), and their endpoints are documented by their owner and at `/docs`.
+If one is missing or fails to import, the API still starts and logs
+`WARNING: passport router not loaded: <reason>`.
+
+Code that needs the data should use `api/core.py`: `get_data()`, `get_validation()`,
+`get_areas()`, `get_area(id)`, `calendar_for_bbox(bbox, start, end)`. Data loads on first use and
+is cached.
 
 ## Method and limits
 
@@ -98,4 +191,6 @@ for Resource Management System (FIRMS), part of NASA's LANCE and ESDIS.
 ## Use of AI
 
 Pipeline and API starter code drafted with Claude (Anthropic) during the hackathon and reviewed
-and modified by the team. (Keep this list current: it goes in the "Use of SI" field.)
+and modified by the team. Backend core (api/core.py, /areas, /validation, /health, tests,
+scripts/export_backups.py, render.yaml) drafted with Claude Code (Anthropic).
+(Keep this list current: it goes in the "Use of SI" field.)
