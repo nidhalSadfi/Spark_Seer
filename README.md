@@ -3,25 +3,56 @@
 A harmonized MODIS + VIIRS burning-activity calendar, built for the NASA Space Apps Challenge 2026
 (Tunis), challenge **Harmonization of MODIS and VIIRS Hot Spots**.
 
-The FIRMS downloader, the real ingest and the data exploration live in
-[harmonization-modis-viirs/](harmonization-modis-viirs/) (data person's folder).
+Repository layout:
+
+| Folder | Owner | What |
+|---|---|---|
+| `api/`, `scripts/`, `tests/`, `web/demo/` | backend | the API, data build scripts, tests, demo page |
+| `harmonization-modis-viirs/` | data | FIRMS downloader (`firms_tool`), the real ingest, data exploration |
+| `meteomatics-weather/` | weather | Meteomatics forecast grid and map, mounted at `/meteomatics/*` |
+| `pipeline/calibrate.py` | data | MODIS -> VIIRS ratios, validation, harmonized series |
 
 ## Run it
+
+The real data is committed (`data/harmonized.parquet`, `data/fires.csv`), so serving needs no build:
 
 ```bash
 # Use a virtualenv: a system Python with old numpy breaks pyarrow ("Unable to find a usable engine").
 python3 -m venv .venv            # Debian/Ubuntu: needs `sudo apt install python3-venv` first
 source .venv/bin/activate        # gives you `python`, `pip`, `uvicorn` from the venv
 pip install -r requirements.txt
-# 1. Put unzipped FIRMS yearly country CSVs (MODIS C6.1 + VIIRS S-NPP 375 m) under data/raw/
-python pipeline/ingest.py data/raw data/cells.parquet 34   # 34 = keep north of 34N (drops Saharan gas flares)
-# 2. Fit MODIS->VIIRS ratios, validate on held-out years, write the harmonized series
-python pipeline/calibrate.py data/cells.parquet data/harmonized.parquet
-# 3. Serve the API (data path: env EMBER_DATA, default data/harmonized.parquet)
 uvicorn api.main:app --reload --port 8000
 # open http://localhost:8000/ for the demo page, or GET /calendar?area=bizerte&start=2003&end=2025
-# 4. Offline demo fallback: writes web/backup/<area_id>.json, areas.json, validation.json
-python scripts/export_backups.py
+```
+
+Rebuild the data from NASA FIRMS (public files, no login; about 2 minutes and 122 MB):
+
+```bash
+pip install -r requirements-dev.txt
+# 1. Download the yearly country CSVs for Tunisia and Algeria into data/raw/ (gitignored)
+(cd harmonization-modis-viirs && python -m firms_tool archive --sensors modis_c61 --years 2001-2025 \
+    --countries Tunisia Algeria --out ../data/raw)
+(cd harmonization-modis-viirs && python -m firms_tool archive --sensors viirs_snpp --years 2012-2025 \
+    --countries Tunisia Algeria --out ../data/raw)
+# 2. Count detections per 0.5 degree cell and month; 34 = keep north of 34N (drops Saharan gas flares)
+python harmonization-modis-viirs/pipeline/ingest.py data/raw data/cells.parquet 34
+# 3. Fit MODIS->VIIRS ratios, validate on held-out years, write data/harmonized.parquet (+ _validation.json)
+python scripts/build_data.py          # renames ingest's lat_i/lon_i to cy/cx, runs pipeline/calibrate.py
+# 4. Fire layer for /meteomatics/fires/calendar, and the offline demo backups
+python scripts/export_fires.py        # data/fires.csv
+python scripts/export_backups.py      # web/backup/
+```
+
+Expected step 2 output: MODIS 67,230 and VIIRS 137,470 detections, 16,607 rows (the same as
+`harmonization-modis-viirs/docs/p1-ingest.md`).
+
+Meteomatics forecasts (needs an account; credentials stay in the gitignored
+`meteomatics-weather/.env`, see `meteomatics-weather/.env.weather.example`):
+
+```bash
+cd meteomatics-weather
+python -m pipeline.weather       # data/weather.json: the two named points (/meteomatics/weather)
+python -m pipeline.weather_map   # data/weather_grid.json: 35 cells (/meteomatics/weather/map, /cell, /point)
 ```
 
 Tests (synthetic data in a tmp dir, never the real files):
@@ -62,17 +93,18 @@ errors, the weather context, table views, and an **API log** with the raw JSON o
 
 ## Deploy (Render, free web service)
 
-1. Commit the files the API serves: `data/harmonized.parquet`, `data/harmonized_validation.json`
-   (small) and `data/areas.json`. Never commit `data/raw/`: it is gitignored because the raw CSVs
-   are ~127 MB and one file is over GitHub's 100 MB limit.
+1. The files the API serves are committed: `data/harmonized.parquet`,
+   `data/harmonized_validation.json`, `data/areas.json`, `data/fires.csv` and `web/backup/`.
+   Never commit `data/raw/`: it is gitignored because the raw CSVs are ~122 MB.
 2. Merge to `main` and push. `render.yaml` deploys from `main`.
 3. Render dashboard: **New > Blueprint**, pick this GitHub repo, apply. `render.yaml` sets the free
-   plan, `pip install -r requirements.txt`, the start command
-   `uvicorn api.main:app --host 0.0.0.0 --port $PORT`, the health check `/health` and
-   `PYTHON_VERSION=3.11.9`.
+   plan, the build command (`pip install -r requirements.txt`, then the Meteomatics refresh), the
+   start command `uvicorn api.main:app --host 0.0.0.0 --port $PORT`, the health check `/health`
+   and `PYTHON_VERSION=3.11.9`. It asks for `METEOMATICS_USER`, `METEOMATICS_PASSWORD` and
+   `ANTHROPIC_API_KEY`. All three are optional: leave them empty and the build still succeeds.
    Without Blueprints: **New > Web Service**, runtime Python, same build and start commands,
    env var `PYTHON_VERSION=3.11.9`, health check path `/health`.
-4. Open `https://<service>.onrender.com/health`: expect `"status": "ok"` and the real row count.
+4. Open `https://<service>.onrender.com/health`: expect `"status": "ok"` and `"rows": 13070`.
    A 503 there means the data files were not committed, and Render marks the deploy as failed.
 
 Notes:
@@ -82,6 +114,10 @@ Notes:
   **Environment** tab, never in the repo: `ANTHROPIC_API_KEY` turns on the passport's optional AI
   wording, and `EMBER_LLM_MODEL` overrides its model (default `claude-haiku-5-5`). Without the
   key, the passport is still returned, without AI text.
+- Meteomatics forecasts are fetched once per deploy (build command), so they go stale after
+  3 hours: `/meteomatics/weather*` then returns them with `"stale": true`. Redeploy (Render:
+  **Manual Deploy**) before the demo for a fresh forecast. Without credentials those routes
+  return 503, and `/weather` (Open-Meteo, no key) still works.
 - If the server dies mid-demo, the front end can read `web/backup/*.json` (same JSON as the API).
   Run `python scripts/export_backups.py` once the real data is in place, then commit `web/backup/`.
 
@@ -95,7 +131,7 @@ Errors return `{"detail": "..."}`: **400** for bad parameters, **503** when a da
 (the message names the file).
 
 Contract: the front end builds against `web/mock_calendar.json`. Existing fields are never renamed
-or removed, only added to. All example values below are synthetic or illustrative.
+or removed, only added to. Example values below are real (the committed data) unless marked.
 
 | Endpoint | Purpose |
 |---|---|
@@ -105,13 +141,19 @@ or removed, only added to. All example values below are synthetic or illustrativ
 | `GET /validation` | Held-out validation report of the MODIS->VIIRS harmonization |
 | `POST /investigate` | Evidence Passport for one area and month (`api/passport.py`, teammate) |
 | `GET /weather?area=<id>` | 3-day Open-Meteo weather context plus historical context (`api/weather.py`, teammate) |
+| `GET /meteomatics/weather?area=<id>` | Meteomatics 72 h forecast at a named point (`meteomatics-weather/`, teammate) |
+| `GET /meteomatics/weather/map?window=0..2&variable=` | Forecast GeoJSON for the 35-cell grid, one 24 h window |
+| `GET /meteomatics/weather/grid-meta` | Grid geometry and bounds (works without a forecast) |
+| `GET /meteomatics/weather/cell/<grid_id>` | 72 h forecast for one cell, e.g. `tn_37.0_9.5` |
+| `GET /meteomatics/weather/point?lat=&lon=` | Forecast of the cell that contains a point |
+| `GET /meteomatics/fires/calendar?grid_id=&day=&limit=` | Real VIIRS detections per day and as map points (`data/fires.csv`) |
 
 ### `GET /health`
 
 No parameters.
 
 ```json
-{"status": "ok", "data_file": "data/harmonized.parquet", "rows": 48210}
+{"status": "ok", "data_file": "data/harmonized.parquet", "rows": 13070}
 ```
 
 `rows` counts the rows in `harmonized.parquet` (cell x month with detections). If the file is
@@ -119,14 +161,15 @@ missing the response is a 503.
 
 ### `GET /areas`
 
-No parameters. Read from `data/areas.json`. The boxes are approximate and will be refined.
+No parameters. Read from `data/areas.json`, the data person's demo boxes
+(`harmonization-modis-viirs/docs/p1/demo_areas.json`).
 
 ```json
 {"areas": [
-  {"id": "bizerte", "name": "Bizerte", "bbox": [9.0, 36.8, 10.3, 37.4]},
-  {"id": "nw_tunisia", "name": "Northwest Tunisia", "bbox": [8.3, 36.2, 9.2, 37.0]},
+  {"id": "bizerte", "name": "Bizerte / NW Tunisia", "bbox": [8.3, 36.0, 9.8, 37.2]},
   {"id": "kabylie", "name": "Kabylie", "bbox": [3.7, 36.3, 5.2, 37.0]},
-  {"id": "ne_algeria", "name": "Northeast Algeria", "bbox": [7.0, 36.4, 8.6, 37.0]}
+  {"id": "ne_algeria", "name": "NE Algeria", "bbox": [7.0, 36.4, 8.6, 37.0]},
+  {"id": "petite_kabylie", "name": "Petite Kabylie", "bbox": [5.3, 36.4, 6.9, 37.1]}
 ]}
 ```
 
@@ -136,31 +179,33 @@ No parameters. Read from `data/areas.json`. The boxes are approximate and will b
 
 | Parameter | Required | Default | Meaning |
 |---|---|---|---|
-| `bbox` | one of `bbox` / `area` | | `minLon,minLat,maxLon,maxLat`, e.g. `9.0,36.8,10.3,37.4` |
+| `bbox` | one of `bbox` / `area` | | `minLon,minLat,maxLon,maxLat`, e.g. `8.3,36.0,9.8,37.2` |
 | `area` | one of `bbox` / `area` | | an `id` from `/areas`, e.g. `bizerte` |
 | `start` | no | `2001` | first year |
 | `end` | no | `2025` | last year (inclusive) |
 
 It returns 400 when neither or both of `bbox` and `area` are given, when the area id is unknown,
 or when the bbox is malformed. Examples: `/calendar?area=bizerte&start=2003&end=2025`,
-`/calendar?bbox=8.0,35.0,11.0,37.5`.
+`/calendar?bbox=8.0,35.0,11.0,37.5`. Below: `/calendar?area=kabylie`, one month shown (August 2021,
+the Kabylie fires).
 
 ```json
 {
   "months": [
-    {"year": 2017, "month": 8, "modis_raw": 82, "viirs_raw": 246, "harmonized": 246,
-     "support": 410, "z": 10.5, "flag": "high"}
+    {"year": 2021, "month": 8, "modis_raw": 1048.0, "viirs_raw": 4483.0, "harmonized": 4483.0,
+     "support": 3897.0, "z": 8.3, "flag": "high"}
   ],
   "meta": {
-    "cells": 30,
+    "cells": 8,
     "critical_months": [7, 8, 9],
     "validation": {"train_years": [2012, 2019], "test_years": [2020, 2021],
-                   "error_pct_uncorrected": 66.4, "error_pct_global_ratio": 23.1,
-                   "error_pct_cell_month_ratio": 20.9, "k_global": 3.04, "test_months": 24}
+                   "error_pct_uncorrected": 72.1, "error_pct_global_ratio": 13.7,
+                   "error_pct_cell_month_ratio": 11.5, "k_global": 3.48, "test_months": 24}
   }
 }
 ```
 
+- Counts are JSON numbers rounded to one decimal (`1048.0`).
 - `harmonized`: VIIRS-equivalent detections. Before 2012 = MODIS x ratio k; from 2012 = observed VIIRS.
 - `flag`: `high` / `low` (robust z-score vs the same month in other years, |z| >= 3),
   `low_confidence` (pre-2012 month whose ratio rests on < 30 MODIS detections), or `normal`.
@@ -187,8 +232,8 @@ held-out test years, compared at region x month level.
 
 ```json
 {"train_years": [2012, 2019], "test_years": [2020, 2021],
- "error_pct_uncorrected": 66.4, "error_pct_global_ratio": 23.1,
- "error_pct_cell_month_ratio": 20.9, "k_global": 3.04, "test_months": 24}
+ "error_pct_uncorrected": 72.1, "error_pct_global_ratio": 13.7,
+ "error_pct_cell_month_ratio": 11.5, "k_global": 3.48, "test_months": 24}
 ```
 
 - `error_pct_*`: mean absolute monthly error as a % of the mean observed VIIRS count. The three
@@ -203,6 +248,14 @@ held-out test years, compared at region x month level.
 `router` (a FastAPI `APIRouter`), and their endpoints are documented by their owner and at `/docs`.
 If one is missing or fails to import, the API still starts and logs
 `WARNING: passport router not loaded: <reason>`.
+
+`meteomatics-weather/api/weather_router_example.py` is loaded by path and mounted under
+`/meteomatics`, because its own `GET /weather` would clash with `api/weather.py`'s. Its modules
+import `pipeline.*` from `meteomatics-weather/pipeline/`; neither `pipeline/` folder has an
+`__init__.py`, so Python merges them into one namespace (no module names overlap). Its routes only
+read caches: forecasts from `meteomatics-weather/data/weather*.json` (503 until a refresh has run),
+fire points from `NASA_FIRMS_CSV` (default `data/fires.csv`). Status codes: 404 unknown area or
+cell, 422 bad window or date, 503 no forecast cache.
 
 Code that needs the data should use `api/core.py`: `get_data()`, `get_validation()`,
 `get_areas()`, `get_area(id)`, `calendar_for_bbox(bbox, start, end)`. Data loads on first use and
@@ -231,5 +284,6 @@ for Resource Management System (FIRMS), part of NASA's LANCE and ESDIS.
 
 Pipeline and API starter code drafted with Claude (Anthropic) during the hackathon and reviewed
 and modified by the team. Backend core (api/core.py, /areas, /validation, /health, tests,
-scripts/export_backups.py, render.yaml) drafted with Claude Code (Anthropic).
+scripts/export_backups.py, scripts/build_data.py, scripts/export_fires.py, render.yaml, the
+wiring of the data and Meteomatics branches) drafted with Claude Code (Anthropic).
 (Keep this list current: it goes in the "Use of SI" field.)
