@@ -13,7 +13,6 @@ import pandas as pd
 
 KEY_COLS = ["cy", "cx", "year", "month"]
 FAMILIES = ("MODIS", "SNPP", "NOAA20", "NOAA21")
-VIIRS_FAMILIES = ("SNPP", "NOAA20", "NOAA21")
 # FIRMS source id prefix -> sensor family (spec: MODIS_* / VIIRS_SNPP_* / VIIRS_NOAA20_* / VIIRS_NOAA21_*).
 SOURCE_PREFIXES = (("MODIS_", "MODIS"), ("VIIRS_SNPP_", "SNPP"), ("VIIRS_NOAA20_", "NOAA20"),
                    ("VIIRS_NOAA21_", "NOAA21"))
@@ -32,8 +31,10 @@ REFERENCE_PENDING = "reference_pending"          # NOAA-20 needed but no approve
 MIXED_REFERENCE = "mixed_reference"              # S-NPP days up to its end + scaled NOAA-20 after
 REFERENCE_UNAVAILABLE = "reference_unavailable"  # the reference sensor has no fetched day this month (I7)
 MODIS_UNAVAILABLE = "modis_unavailable"          # MODIS has no fetched day this month (I7)
-DRIFT_WARN = "drift_warn"                        # region-month drift above DRIFT_WARN_PCT
-ROW_FLAGS = (DRIFT_WARN, MIXED_REFERENCE, MODIS_UNAVAILABLE, PARTIAL, REFERENCE_PENDING, REFERENCE_UNAVAILABLE)
+# Row flags depend only on the row's own key, coverage and calibration, never on which other keys
+# are in the run, so recomputing selected keys gives the same rows as a full recompute. Drift is a
+# region-month measure over the run's rows: it is a job-level soft flag, not a row flag.
+ROW_FLAGS = (MIXED_REFERENCE, MODIS_UNAVAILABLE, PARTIAL, REFERENCE_PENDING, REFERENCE_UNAVAILABLE)
 
 
 def family_of(source) -> str | None:

@@ -167,7 +167,8 @@ def test_straddle_month_expects_snpp_until_its_end_only():
     avail = {"MODIS": date(2026, 12, 4), "SNPP": SNPP_END, "NOAA20": date(2026, 12, 4)}
     later = datetime(2026, 12, 5, tzinfo=timezone.utc)
     assert month_status(2026, 11, cov, avail, later, SNPP_END) == (True, [])
-    short = Coverage.from_windows([("MODIS", "2026-11-01", 30), ("SNPP", "2026-11-01", 1), ("NOAA20", "2026-11-04", 27)])
+    short = Coverage.from_windows([("MODIS", "2026-11-01", 30), ("SNPP", "2026-11-01", 1),
+                                   ("NOAA20", "2026-11-04", 27)])
     complete, reasons = month_status(2026, 11, short, avail, later, SNPP_END)
     assert not complete and reasons == ["SNPP: 1/2 days covered from 2026-11-01 to 2026-11-02",
                                         "NOAA20: 27/28 days covered from 2026-11-03 to 2026-11-30"]

@@ -63,8 +63,7 @@ def apply_filters(detections: pd.DataFrame, *, mask: StaticMask | None, boundary
     product = product.where(product.isin(["NRT", "SP"]))
     lat = pd.to_numeric(df["latitude"], errors="coerce").astype(float)
     lon = pd.to_numeric(df["longitude"], errors="coerce").astype(float)
-    conf = df["confidence"].astype("string").str.strip() if "confidence" in df else pd.Series(pd.NA, index=df.index,
-                                                                                           dtype="string")
+    conf = (df["confidence"] if "confidence" in df else pd.Series(pd.NA, index=df.index)).astype("string").str.strip()
     typ = (pd.to_numeric(df["type"], errors="coerce").astype(float) if "type" in df
            else pd.Series(np.nan, index=df.index))
 
