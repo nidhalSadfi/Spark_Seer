@@ -1,8 +1,6 @@
 import importlib
 import sys
-import types
 
-from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 import api.main
@@ -87,15 +85,15 @@ def test_calendar_empty_area(client):
     assert body == {"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}
 
 
-def test_teammate_router_included_when_present(monkeypatch):
-    router = APIRouter()
-    router.get("/passport/ping")(lambda: {"ok": True})
-    monkeypatch.setitem(sys.modules, "api.passport", types.SimpleNamespace(router=router))
+def test_app_starts_without_teammate_routers(monkeypatch):
+    monkeypatch.setitem(sys.modules, "api.passport", None)  # makes the import raise ImportError
+    monkeypatch.setitem(sys.modules, "api.weather", None)
     try:
-        assert TestClient(importlib.reload(api.main).app).get("/passport/ping").json() == {"ok": True}
+        paths = importlib.reload(api.main).app.openapi()["paths"]
+        assert "/calendar" in paths and "/investigate" not in paths and "/weather" not in paths
     finally:
-        monkeypatch.delitem(sys.modules, "api.passport")
-        importlib.reload(api.main)  # back to the app without the fake router
+        monkeypatch.undo()
+        importlib.reload(api.main)  # back to the app with the real routers
 
 
 def test_cors_allows_get_and_post_from_any_origin(client):

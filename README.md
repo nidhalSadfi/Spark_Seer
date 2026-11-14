@@ -61,7 +61,9 @@ Notes:
 - Free instances sleep after about 15 minutes idle, and the next request takes up to a minute.
   Open `/health` a few minutes before the demo.
 - The core API needs no secrets. Any API keys for the teammate routers go in Render's
-  **Environment** tab, never in the repo.
+  **Environment** tab, never in the repo: `ANTHROPIC_API_KEY` turns on the passport's optional AI
+  wording, and `EMBER_LLM_MODEL` overrides its model (default `claude-haiku-5-5`). Without the
+  key, the passport is still returned, without AI text.
 - If the server dies mid-demo, the front end can read `web/backup/*.json` (same JSON as the API).
   Run `python scripts/export_backups.py` once the real data is in place, then commit `web/backup/`.
 
@@ -83,6 +85,8 @@ or removed, only added to. All example values below are synthetic or illustrativ
 | `GET /areas` | Named demo areas (ids for `/calendar?area=`) |
 | `GET /calendar` | Monthly harmonized burning-activity calendar for a bbox or an area |
 | `GET /validation` | Held-out validation report of the MODIS->VIIRS harmonization |
+| `POST /investigate` | Evidence Passport for one area and month (`api/passport.py`, teammate) |
+| `GET /weather?area=<id>` | 3-day Open-Meteo weather context plus historical context (`api/weather.py`, teammate) |
 
 ### `GET /health`
 
