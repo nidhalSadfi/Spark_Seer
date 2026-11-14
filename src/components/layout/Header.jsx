@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useIsFetching } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { Menu } from 'lucide-react'
-import { Badge } from '../ui/primitives'
-import { RegionSelector, SensorSelector, YearRangePicker } from '../common/FilterControls'
+import { DataModeBadge } from '../common/DataSource'
+import { AoiChip, RegionSelector, SensorSelector, YearRangePicker } from '../common/FilterControls'
 
 function UtcClock() {
   const [now, setNow] = useState(() => new Date())
@@ -21,7 +21,8 @@ function UtcClock() {
 
 /** Thin ember-colored bar that sweeps across the top while any data request is in flight. */
 function FetchProgress() {
-  const fetching = useIsFetching() > 0
+  // the periodic /health poll shouldn't flash the bar
+  const fetching = useIsFetching({ predicate: (q) => q.queryKey[0] !== 'health' }) > 0
   return (
     <AnimatePresence>
       {fetching && (
@@ -51,13 +52,12 @@ export default function Header({ onMenu }) {
           <Menu className="size-5" />
         </button>
         <RegionSelector />
+        <AoiChip />
         <SensorSelector />
         <YearRangePicker />
         <div className="ml-auto flex items-center gap-4 self-center">
           <UtcClock />
-          <Badge tone="ok">
-            <span className="size-1.5 rounded-full bg-ok motion-safe:animate-pulse" aria-hidden /> Sample data mode
-          </Badge>
+          <DataModeBadge />
         </div>
       </div>
       <FetchProgress />

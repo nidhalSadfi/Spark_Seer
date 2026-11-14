@@ -47,10 +47,11 @@ const TONES = {
   neutral: 'border-line bg-card-hi text-muted',
 }
 
-export function Badge({ tone = 'neutral', className = '', children }) {
+export function Badge({ tone = 'neutral', className = '', children, ...rest }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${TONES[tone]} ${className}`}
+      {...rest}
     >
       {children}
     </span>

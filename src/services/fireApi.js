@@ -1,16 +1,21 @@
 /**
- * Spark Seer data service.
+ * ILLUSTRATIVE MOCK DATA.
  *
- * ILLUSTRATIVE MOCK DATA. Every function here is async and returns plain
- * JSON-shaped data, so swapping in the real backend only means replacing the
- * bodies of these functions. All figures are generated from a seeded PRNG and
- * are NOT real MODIS/VIIRS observations.
+ * Two things live here, and neither is real MODIS/VIIRS data:
+ *  1. `mockCalendar(areaId)`: an offline stand-in for GET /calendar, in the exact shape the
+ *     EmberLedger API returns. src/services/emberApi.js falls back to it when the backend is
+ *     unreachable (the UI then says so).
+ *  2. The near-real-time active-fire feed for the map (`getActiveFires`). The backend has no
+ *     endpoint for this yet, so the map always uses mock data.
+ *
+ * All figures come from a seeded PRNG.
  */
-import { DATA_START_YEAR, REGIONS, VIIRS_START_YEAR } from './constants'
-import { anomalyPct, historicalMedian, latestObservation } from '../utils/stats'
+import { DATA_END_YEAR, DATA_START_YEAR, VIIRS_START_YEAR } from './constants'
+import { median } from '../utils/stats'
 
-const END_YEAR = 2026
-const END_MONTH = 9 // data runs through Oct 2026 (0-indexed)
+const END_YEAR = DATA_END_YEAR // mock calendar covers 2001..2025 like the API's default window
+const NRT_YEAR = 2026 // "now" of the mock near-real-time feed: 31 Oct 2026
+const NRT_MONTH = 9 // 0-indexed
 const VIIRS_FACTOR = 2.4 // VIIRS (375 m) detects more, smaller fires than MODIS (1 km)
 const HARMONIZATION_VERSION = 'placeholder-v0'
 
@@ -54,9 +59,16 @@ const monthDist = (a, b) => {
 
 const matrixCache = new Map()
 
+/** Profile for a modelled region, or a plausible Mediterranean-like one derived from the id. */
+function profileFor(regionId) {
+  if (PROFILES[regionId]) return PROFILES[regionId]
+  const r = mulberry32(hash(`profile:${regionId}`))
+  return { scale: 250 + Math.round(r() * 900), peak: 6 + Math.round(r() * 2), width: 1.1 + r() * 0.5 }
+}
+
 /** Raw MODIS-style monthly counts for one concrete region. */
 function baseRegionMatrix(regionId) {
-  const p = PROFILES[regionId]
+  const p = profileFor(regionId)
   const rng = mulberry32(hash(`region:${regionId}`))
   const years = []
   const data = []
@@ -69,10 +81,6 @@ function baseRegionMatrix(regionId) {
     const yearFactor = trend * swing * extreme
     const row = []
     for (let m = 0; m < 12; m++) {
-      if (y === END_YEAR && m > END_MONTH) {
-        row.push(null)
-        continue
-      }
       const season = 0.06 + 0.94 * Math.exp(-(monthDist(m, p.peak) ** 2) / (2 * p.width ** 2))
       const noise = 0.85 + rng() * 0.3
       row.push(Math.max(0, Math.round(p.scale * season * yearFactor * noise)))
@@ -119,6 +127,70 @@ function sensorMatrix(regionId, sensor) {
   return result
 }
 
+/** Robust z-score (median/MAD), the same idea the backend uses for its flags. */
+function robustZ(values, x) {
+  const med = median(values)
+  const mad = median(values.map((v) => Math.abs(v - med)))
+  if (!mad) return 0
+  return +(0.6745 * ((x - med) / mad)).toFixed(1)
+}
+
+const calendarCache = new Map()
+
+/**
+ * Offline stand-in for GET /calendar. Same shape as the real response:
+ *   { months: [{year, month(1-12), modis_raw, viirs_raw, harmonized, support, z, flag}], meta }
+ * `viirs_raw` is 0 before 2012, like the API's zero-filled grid.
+ */
+export function mockCalendar(areaId) {
+  if (calendarCache.has(areaId)) return calendarCache.get(areaId)
+  const modis = sensorMatrix(areaId, 'modis')
+  const viirs = sensorMatrix(areaId, 'viirs')
+  const harm = sensorMatrix(areaId, 'harmonized')
+
+  // MODIS detections behind the ratio, per calendar month (training years 2012-2019)
+  const support = Array.from({ length: 12 }, (_, m) =>
+    modis.years.reduce((a, y, yi) => (y >= 2012 && y <= 2019 ? a + modis.data[yi][m] : a), 0),
+  )
+
+  const months = []
+  modis.years.forEach((year, yi) => {
+    for (let m = 0; m < 12; m++) {
+      months.push({
+        year,
+        month: m + 1,
+        modis_raw: modis.data[yi][m],
+        viirs_raw: viirs.data[yi][m] ?? 0,
+        harmonized: harm.data[yi][m],
+        support: support[m],
+        z: 0,
+        flag: 'normal',
+      })
+    }
+  })
+
+  for (let m = 1; m <= 12; m++) {
+    const sameMonth = months.filter((r) => r.month === m)
+    const vals = sameMonth.map((r) => r.harmonized)
+    for (const r of sameMonth) {
+      r.z = robustZ(vals, r.harmonized)
+      r.flag = r.year < VIIRS_START_YEAR && r.support < 30 ? 'low_confidence' : r.z >= 3 ? 'high' : r.z <= -3 ? 'low' : 'normal'
+    }
+  }
+
+  const monthMedians = Array.from({ length: 12 }, (_, i) => median(months.filter((r) => r.month === i + 1).map((r) => r.harmonized)))
+  const critical = monthMedians
+    .map((v, i) => [v, i + 1])
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, 3)
+    .map(([, mo]) => mo)
+    .sort((a, b) => a - b)
+
+  const result = { months, meta: { cells: null, critical_months: critical, mock: true } }
+  calendarCache.set(areaId, result)
+  return result
+}
+
 function describe(regionId, sensor) {
   return {
     region: regionId,
@@ -128,99 +200,11 @@ function describe(regionId, sensor) {
   }
 }
 
-/** Year × month matrix of hotspot counts. data[yearIdx][monthIdx], null = no data. */
-export async function getMonthlyMatrix({ region = 'global', sensor = 'harmonized' } = {}) {
-  await latency()
-  const m = sensorMatrix(region, sensor)
-  return { ...m, meta: describe(region, sensor) }
-}
-
-/** Yearly totals for MODIS, VIIRS and harmonized, for the raw-vs-harmonized comparison. */
-export async function getSensorComparison({ region = 'global' } = {}) {
-  await latency()
-  const ids = ['modis', 'viirs', 'harmonized']
-  const mats = Object.fromEntries(ids.map((s) => [s, sensorMatrix(region, s)]))
-  const years = mats.modis.years
-  const totals = Object.fromEntries(
-    ids.map((s) => [
-      s,
-      years.map((_, yi) => {
-        const row = mats[s].data[yi]
-        return row.every((v) => v == null) ? null : row.reduce((a, b) => a + (b ?? 0), 0)
-      }),
-    ]),
-  )
-  return { years, totals, meta: describe(region, 'harmonized') }
-}
-
-/** Latest-month snapshot for every concrete region (used for rankings and alerts). */
-export async function getRegionSummaries({ sensor = 'harmonized' } = {}) {
-  await latency()
-  return REGIONS.filter((r) => r.id !== 'global').map((r) => {
-    const mat = sensorMatrix(r.id, sensor)
-    const last = latestObservation(mat)
-    const current = mat.data[last.yearIdx][last.month]
-    const baseline = historicalMedian(mat, last.year, last.month)
-    return {
-      id: r.id,
-      name: r.name,
-      year: last.year,
-      month: last.month,
-      current,
-      baseline,
-      anomaly: anomalyPct(current, baseline),
-    }
-  })
-}
-
-const CONF = ['low', 'nominal', 'high']
-
-/** Individual (mock) hotspot detections for the Data Explorer. */
-export async function getHotspotRecords({
-  region = 'global',
-  sensor = 'harmonized',
-  confidence = 'all',
-  from,
-  to,
-} = {}) {
-  await latency(300)
-  const fromT = new Date(from).getTime()
-  const toT = new Date(to).getTime()
-  if (!Number.isFinite(fromT) || !Number.isFinite(toT) || toT < fromT) return []
-
-  const rng = mulberry32(hash(`rec:${region}:${sensor}:${from}:${to}`))
-  const profiles = region === 'global' ? Object.values(PROFILES) : [PROFILES[region]]
-  const span = Math.max(1, (toT - fromT) / 86400000)
-  const n = Math.min(600, Math.round(120 + span * 2))
-  const rows = []
-  for (let i = 0; i < n; i++) {
-    const p = profiles[Math.floor(rng() * profiles.length)]
-    const date = new Date(fromT + rng() * (toT - fromT))
-    const src =
-      sensor === 'harmonized' ? (rng() < 0.55 && date.getUTCFullYear() >= VIIRS_START_YEAR ? 'viirs' : 'modis') : sensor
-    if (src === 'viirs' && date.getUTCFullYear() < VIIRS_START_YEAR) continue
-    const conf = CONF[Math.floor(rng() * rng() * 3 * 1.0 + (rng() < 0.4 ? 1 : 0)) % 3]
-    if (confidence !== 'all' && conf !== confidence) continue
-    rows.push({
-      id: `H${String(100000 + i)}`,
-      date: date.toISOString().slice(0, 10),
-      lat: +(p.lat[0] + rng() * (p.lat[1] - p.lat[0])).toFixed(4),
-      lon: +(p.lon[0] + rng() * (p.lon[1] - p.lon[0])).toFixed(4),
-      sensor: src.toUpperCase(),
-      confidence: conf,
-      frp: +(2 + rng() * rng() * 180).toFixed(1),
-      brightness: +(300 + rng() * 60).toFixed(1),
-    })
-  }
-  rows.sort((a, b) => (a.date < b.date ? 1 : -1))
-  return rows
-}
-
 // ───────────────────────── Near-real-time active fires (map) ─────────────────────────
 
 const HOUR = 3600000
-/** "Now" for the mock NRT feed: the last day of the mock record. */
-const SNAPSHOT = Date.UTC(END_YEAR, END_MONTH, 31, 14, 0)
+/** "Now" for the mock NRT feed. */
+const SNAPSHOT = Date.UTC(NRT_YEAR, NRT_MONTH, 31, 14, 0)
 const NRT_WINDOW_H = 24 // detections shown on the map
 const CHART_BACK_H = 36 // pass history per fire
 const FORECAST_H = 12
@@ -322,7 +306,7 @@ function regionActiveFires(regionId) {
   if (nrtCache.has(regionId)) return nrtCache.get(regionId)
   const p = PROFILES[regionId]
   const rng = mulberry32(hash(`nrt:${regionId}`))
-  const season = 0.06 + 0.94 * Math.exp(-(monthDist(END_MONTH, p.peak) ** 2) / (2 * p.width ** 2))
+  const season = 0.06 + 0.94 * Math.exp(-(monthDist(NRT_MONTH, p.peak) ** 2) / (2 * p.width ** 2))
   const sites = FIRE_SITES[regionId].filter(() => rng() < 0.35 + 0.65 * season)
   const winStart = SNAPSHOT - NRT_WINDOW_H * HOUR
   const fires = []
@@ -464,7 +448,9 @@ export function regionBounds(region) {
  */
 export async function getActiveFires({ region = 'global', sensor = 'harmonized' } = {}) {
   await latency(260)
-  const ids = region === 'global' ? Object.keys(PROFILES) : [region]
+  // The mock feed only models a few world regions. For any other region (e.g. the backend's
+  // Tunisia/Algeria areas) show the whole mock world instead of nothing.
+  const ids = PROFILES[region] ? [region] : Object.keys(PROFILES)
   let fires = []
   let detections = []
   for (const id of ids) {
@@ -490,6 +476,5 @@ export async function getActiveFires({ region = 'global', sensor = 'harmonized' 
 
 export const DATA_RANGE = {
   startYear: DATA_START_YEAR,
-  endYear: END_YEAR,
-  endDate: `${END_YEAR}-${String(END_MONTH + 1).padStart(2, '0')}-31`,
+  endYear: DATA_END_YEAR,
 }

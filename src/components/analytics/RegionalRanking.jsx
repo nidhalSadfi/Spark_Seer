@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import EChart, { axisStyle, tooltipStyle } from '../common/EChart'
 import { Skeleton } from '../ui/primitives'
-import { fmtInt } from '../../utils/format'
+import { fmtAxis, fmtInt } from '../../utils/format'
 
 export default function RegionalRanking({ summaries }) {
   const option = useMemo(() => {
@@ -10,7 +10,7 @@ export default function RegionalRanking({ summaries }) {
     return {
       grid: { left: 130, right: 28, top: 8, bottom: 8 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tooltipStyle, valueFormatter: fmtInt },
-      xAxis: { type: 'value', ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: (v) => `${v / 1000}k` } },
+      xAxis: { type: 'value', ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: fmtAxis } },
       yAxis: { type: 'category', data: sorted.map((r) => r.name), ...axisStyle },
       series: [
         {

@@ -1,6 +1,8 @@
 import { Activity, CalendarClock, Gauge, Scale } from 'lucide-react'
 import { motion } from 'motion/react'
-import { Card, CardHeader, IllustrativeNotice } from '../components/ui/primitives'
+import { Card, CardHeader } from '../components/ui/primitives'
+import { DataSourceNotice, EmptyAreaNotice } from '../components/common/DataSource'
+import WeatherCard from '../components/dashboard/WeatherCard'
 import HeroBanner from '../components/dashboard/HeroBanner'
 import KPICard from '../components/dashboard/KPICard'
 import FireTrendChart from '../components/dashboard/FireTrendChart'
@@ -10,13 +12,13 @@ import FireMap from '../components/map/FireMap'
 import { useMonthlyMatrix, useRegionSummaries } from '../hooks/useFireData'
 import { MONTHS, anomalyPct, historicalMedian, latestObservation } from '../utils/stats'
 import { anomalyTone } from '../utils/format'
-import { regionName, sensorLabel } from '../services/constants'
+import { sensorLabel } from '../services/constants'
 import { useFilters } from '../context/FilterContext'
 
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.07 } } }
 
 export default function Overview() {
-  const { region, sensor } = useFilters()
+  const { target, sensor } = useFilters()
   const { data: matrix, isLoading } = useMonthlyMatrix()
   const { data: summaries } = useRegionSummaries()
 
@@ -30,20 +32,25 @@ export default function Overview() {
       current,
       baseline,
       anomaly: anomalyPct(current, baseline),
-      weekly: Math.round(current / 4.3),
     }
   }
 
   return (
     <>
       <HeroBanner
-        regionLabel={regionName(region)}
+        regionLabel={target.name}
         sensorLabel={sensorLabel(sensor)}
         latest={kpi?.label}
       />
 
+      {matrix?.meta.empty && (
+        <div className="mb-4">
+          <EmptyAreaNotice note={matrix.meta.note} />
+        </div>
+      )}
+
       <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <KPICard label="Active hotspots (7-day est.)" icon={Activity} value={kpi?.weekly} loading={isLoading} hint="Estimated from latest month" />
+        <KPICard label="Grid cells with detections" icon={Activity} value={matrix?.meta.cells} loading={isLoading} hint="0.5° cells overlapping the area" />
         <KPICard label="Latest month" icon={CalendarClock} value={kpi?.current} loading={isLoading} hint={kpi?.label} />
         <KPICard label="Historical median" icon={Scale} value={kpi?.baseline} loading={isLoading} hint="Same calendar month, prior years" />
         <KPICard
@@ -60,7 +67,7 @@ export default function Overview() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <CardHeader kicker="Geospatial" title="Hotspot activity" subtitle="Interactive map preview" />
+          <CardHeader kicker="Geospatial" title="Hotspot activity" subtitle="Interactive map preview · illustrative near-real-time layer" />
           <FireMap height={300} compact />
         </Card>
         <Card delay={0.08}>
@@ -77,8 +84,13 @@ export default function Overview() {
         </Card>
       </div>
 
+      <Card className="mt-4">
+        <CardHeader kicker="Context" title="Weather outlook" subtitle="Next 3 days for the selected area" />
+        <WeatherCard />
+      </Card>
+
       <div className="mt-4">
-        <IllustrativeNotice />
+        <DataSourceNotice />
       </div>
     </>
   )

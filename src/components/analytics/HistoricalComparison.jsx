@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import EChart, { axisStyle, tooltipStyle } from '../common/EChart'
 import { Skeleton } from '../ui/primitives'
-import { fmtInt } from '../../utils/format'
+import { fmtAxis, fmtInt } from '../../utils/format'
 
 const SERIES = [
   { key: 'modis', name: 'MODIS (raw)', color: '#f59e0b', dash: 'solid' },
@@ -19,7 +19,7 @@ export default function HistoricalComparison({ comparison, startYear, endYear })
       tooltip: { trigger: 'axis', ...tooltipStyle, valueFormatter: (v) => (v == null ? 'n/a' : fmtInt(v)) },
       legend: { top: 0, textStyle: { color: '#a7b5c8' }, itemWidth: 16, itemHeight: 8 },
       xAxis: { type: 'category', data: idx.map((i) => comparison.years[i]), ...axisStyle },
-      yAxis: { type: 'value', ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: (v) => `${v / 1000}k` } },
+      yAxis: { type: 'value', ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: fmtAxis } },
       series: SERIES.map((s) => ({
         name: s.name,
         type: 'line',
