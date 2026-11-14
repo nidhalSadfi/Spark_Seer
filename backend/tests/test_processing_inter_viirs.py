@@ -14,7 +14,7 @@ from processing_synth import archive_row, write_archive_csv
 SPEC_OUTAGES = [("SNPP", "2022-07-27", "2022-08-10"), ("SNPP", "2024-05-30", "2024-06-03"),
                 ("SNPP", "2024-07-10", "2024-07-15"), ("SNPP", "2024-07-25", "2024-07-28"),
                 ("NOAA20", "2023-07-19", "2023-07-22")]
-OUTAGE_MONTHS = {(2022, 7), (2022, 8), (2023, 7), (2024, 5), (2024, 6), (2024, 7)}
+OUTAGE_MONTHS = {(2022, 7), (2022, 8), (2023, 7), (2024, 5), (2024, 6), (2024, 7), (2024, 11)}
 
 
 def region_counts(table: dict) -> pd.DataFrame:
@@ -27,10 +27,27 @@ def region_counts(table: dict) -> pd.DataFrame:
 
 def test_committed_outages_are_exactly_the_spec_list():
     doc = load_outages()
-    assert [(o["family"], o["start"], o["end"]) for o in doc["outages"]] == SPEC_OUTAGES
+    days = [(o["family"], o["start"], o["end"]) for o in doc["outages"] if "start" in o]
+    months = [(o["family"], o["month"]) for o in doc["outages"] if "month" in o]
+    assert days == SPEC_OUTAGES and months == [("SNPP", "2024-11")]  # spec §5: S-NPP 2024-11 as a whole month
+    assert "S-NPP outage" in next(o["note"] for o in doc["outages"] if "month" in o)
     assert "data-exploration.md" in doc["source"] and "harmonization-modis-viirs" in doc["source"]
     assert outage_months(doc) == OUTAGE_MONTHS
     assert outage_months(doc, families=("NOAA20",)) == {(2023, 7)}
+
+
+def test_month_level_outage_entries(tmp_path):
+    entries = [{"family": "NOAA20", "month": "2024-02", "note": "test"},
+               {"family": "SNPP", "start": "2023-12-31", "end": "2024-01-01"}]
+    assert outage_months(entries) == {(2024, 2), (2023, 12), (2024, 1)}
+    assert outage_months(entries, families=("SNPP",)) == {(2023, 12), (2024, 1)}
+    for bad in ({"family": "SNPP", "month": "2024-13"}, {"family": "SNPP", "start": "2024-01-01"},
+                {"family": "SNPP", "month": "2024-01", "start": "2024-01-01", "end": "2024-01-02"},
+                {"family": "SNPP", "start": "2024-01-02", "end": "2024-01-01"}, {"month": "2024-01"}):
+        path = tmp_path / "outages.json"
+        path.write_text(json.dumps({"source": "test", "outages": [bad]}))
+        with pytest.raises(ValueError):
+            load_outages(path)
 
 
 def test_recovers_a_planted_r_and_excludes_outage_months():
@@ -48,9 +65,9 @@ def test_recovers_a_planted_r_and_excludes_outage_months():
     assert fit.r_global == pytest.approx(1.02, abs=0.005)
     assert all(v == pytest.approx(1.02, abs=0.02) for v in fit.r.values())
     rep = fit.report
-    assert rep["excluded_months"] == 6 and rep["excluded_month_list"] == [
-        "2022-07", "2022-08", "2023-07", "2024-05", "2024-06", "2024-07"]
-    assert rep["train_months"] == 57 and rep["test_months"] == 21
+    assert rep["excluded_months"] == 7 and rep["excluded_month_list"] == [
+        "2022-07", "2022-08", "2023-07", "2024-05", "2024-06", "2024-07", "2024-11"]
+    assert rep["train_months"] == 57 and rep["test_months"] == 20
     assert rep["error_pct_month_ratio"] < rep["error_pct_uncorrected"]
     assert abs(rep["deviation_from_reference_pct"]) < 1
     biased = fit_inter_viirs(region_counts(table), [])  # outages not excluded: r pulled away from 1.02
@@ -104,7 +121,7 @@ def test_cli_applies_the_filter_and_writes_the_fit(tmp_path):
     assert all(v == pytest.approx(31 / 30) for v in doc["r"].values())
     rep = doc["report"]
     assert rep["error_pct_month_ratio"] == 0.0 and rep["error_pct_uncorrected"] == round(100 / 31, 1)
-    assert rep["excluded_months"] == 6 and rep["train_months"] == 57
+    assert rep["excluded_months"] == 7 and rep["train_months"] == 57 and rep["test_months"] == 20
     assert doc["filter"]["dropped"]["low_confidence"] == {"SNPP": 50}
     assert doc["filter"]["dropped"]["south_of_min_lat"] == {"SNPP": 50}
     assert doc["filter"]["rules"]["country_clip"]["status"] == "disabled"

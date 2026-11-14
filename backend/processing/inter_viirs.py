@@ -7,8 +7,8 @@ S, N = S-NPP and NOAA-20 detections (filtered); pseudo in NOAA-20 detections. Va
 years (default 2024-2025) at region-month level with calibrate.validate's measure:
     error % = 100 * mean |pred - observed S-NPP| / max(mean observed, 1), over months present in
     either sensor (outer join, missing = 0).
-Any (year, month) containing a known outage day of S-NPP or NOAA-20 is excluded from fit and test:
-a dark satellite looks like "no fires".
+Any (year, month) containing a known outage day of S-NPP or NOAA-20, or listed as a whole outage
+month, is excluded from fit and test: a dark satellite looks like "no fires".
 """
 
 from __future__ import annotations
@@ -29,25 +29,46 @@ AUSTRALIA_REFERENCE_R = 1.02  # NOAA-20 / S-NPP median 0.98 in the Australia exp
 
 
 def load_outages(path=OUTAGES_FILE) -> dict:
+    """The outage file: {"source", "outages": [...]}. An entry is either a day range
+    {"family", "start", "end"} (inclusive) or a whole month {"family", "month": "YYYY-MM", "note"}."""
     doc = json.loads(Path(path).read_text())
     if "outages" not in doc or "source" not in doc:
         raise ValueError(f"{path} needs 'outages' and 'source'")
+    for entry in doc["outages"]:
+        _entry_months(entry)  # validates
     return doc
 
 
-def outage_months(outages, families=("SNPP", "NOAA20")) -> set[tuple[int, int]]:
-    """(year, month) pairs containing at least one outage day of the given families."""
-    entries = outages["outages"] if isinstance(outages, dict) else outages
+def _entry_months(entry: dict) -> set[tuple[int, int]]:
+    if "family" not in entry:
+        raise ValueError(f"outage entry without family: {entry}")
+    if "month" in entry:
+        if "start" in entry or "end" in entry:
+            raise ValueError(f"outage entry has both month and start/end: {entry}")
+        year, month = (int(p) for p in str(entry["month"]).split("-"))
+        if not 1 <= month <= 12:
+            raise ValueError(f"outage month must be YYYY-MM: {entry}")
+        return {(year, month)}
+    if "start" not in entry or "end" not in entry:
+        raise ValueError(f"outage entry needs start and end, or month: {entry}")
+    day, last = as_date(entry["start"]), as_date(entry["end"])
+    if last < day:
+        raise ValueError(f"outage ends before it starts: {entry}")
     months = set()
-    for o in entries:
-        if o["family"] not in families:
-            continue
-        day, last = as_date(o["start"]), as_date(o["end"])
-        if last < day:
-            raise ValueError(f"outage ends before it starts: {o}")
-        while day <= last:
-            months.add((day.year, day.month))
-            day += timedelta(days=1)
+    while day <= last:
+        months.add((day.year, day.month))
+        day += timedelta(days=1)
+    return months
+
+
+def outage_months(outages, families=("SNPP", "NOAA20")) -> set[tuple[int, int]]:
+    """(year, month) pairs containing at least one outage day (or a whole-month entry) of the given
+    families."""
+    entries = outages["outages"] if isinstance(outages, dict) else outages
+    months: set[tuple[int, int]] = set()
+    for entry in entries:
+        if entry["family"] in families:
+            months |= _entry_months(entry)
     return months
 
 

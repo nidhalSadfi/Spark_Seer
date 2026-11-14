@@ -1,11 +1,12 @@
 {
-  "source": "Australia exploration, table 'Data gaps' (longest zero-detection runs per satellite, type 0): origin/harmonization-modis-viirs:harmonization-modis-viirs/docs/data-exploration.md (branch head e07ecf5); listed in docs/processing/ARCHITECTURE.md section 5.",
-  "note": "Satellite-level gaps (whole days without data), inclusive dates, UTC. Families: SNPP = VIIRS S-NPP, NOAA20 = VIIRS NOAA-20. Partial-day outages are not listed; the FIRMS missing-data list was not cross-checked.",
+  "source": "Australia exploration: table 'Data gaps' (longest zero-detection runs per satellite, type 0) and finding 7 (outlier months): origin/harmonization-modis-viirs:harmonization-modis-viirs/docs/data-exploration.md (branch head e07ecf5); listed in docs/processing/ARCHITECTURE.md section 5.",
+  "note": "Day entries (start, end) are satellite-level gaps: whole days without data, inclusive, UTC. Month entries exclude a whole month whose dark days are not listed. Families: SNPP = VIIRS S-NPP, NOAA20 = VIIRS NOAA-20. Only the longest runs are listed (30 of S-NPP's 41 dark days); partial-day outages are not; Phase 2b cross-checks the list against the FIRMS missing-data endpoint.",
   "outages": [
     {"family": "SNPP", "start": "2022-07-27", "end": "2022-08-10"},
     {"family": "SNPP", "start": "2024-05-30", "end": "2024-06-03"},
     {"family": "SNPP", "start": "2024-07-10", "end": "2024-07-15"},
     {"family": "SNPP", "start": "2024-07-25", "end": "2024-07-28"},
-    {"family": "NOAA20", "start": "2023-07-19", "end": "2023-07-22"}
+    {"family": "NOAA20", "start": "2023-07-19", "end": "2023-07-22"},
+    {"family": "SNPP", "month": "2024-11", "note": "The exploration attributes this outlier month (S-NPP/MODIS ratio 3.4) to an S-NPP outage without listing its days."}
   ]
 }
