@@ -95,3 +95,13 @@ def test_teammate_router_included_when_present(monkeypatch):
     finally:
         monkeypatch.delitem(sys.modules, "api.passport")
         importlib.reload(api.main)  # back to the app without the fake router
+
+
+def test_cors_allows_get_and_post_from_any_origin(client):
+    for method in ["GET", "POST"]:
+        r = client.options("/calendar", headers={"Origin": "https://example.org",
+                                                 "Access-Control-Request-Method": method})
+        assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
+    r = client.options("/calendar", headers={"Origin": "https://example.org",
+                                             "Access-Control-Request-Method": "DELETE"})
+    assert r.status_code == 400
