@@ -3,6 +3,9 @@
 A harmonized MODIS + VIIRS burning-activity calendar, built for the NASA Space Apps Challenge 2026
 (Tunis), challenge **Harmonization of MODIS and VIIRS Hot Spots**.
 
+The FIRMS downloader, the real ingest and the data exploration live in
+[harmonization-modis-viirs/](harmonization-modis-viirs/) (data person's folder).
+
 ## Run it
 
 ```bash
