@@ -31,7 +31,8 @@ except ImportError as e:
 
 @app.exception_handler(FileNotFoundError)
 def missing_data(request, exc):
-    return JSONResponse(status_code=503, content={"detail": f"data file not found: {exc.filename}"})
+    # open() sets exc.filename; pyarrow (read_parquet) puts the path in the message instead.
+    return JSONResponse(status_code=503, content={"detail": f"data file not found: {exc.filename or exc}"})
 
 
 @app.get("/health")

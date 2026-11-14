@@ -24,7 +24,8 @@ def test_missing_data_is_503(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBER_DATA", str(tmp_path / "nope.parquet"))
     c = TestClient(app)
     for path in ["/health", "/validation", "/calendar?area=bizerte"]:
-        assert c.get(path).status_code == 503, path
+        r = c.get(path)
+        assert r.status_code == 503 and "nope" in r.json()["detail"], path
 
 
 def check_calendar(body, start, end):
