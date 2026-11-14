@@ -85,6 +85,12 @@ class Calibration:
         return Calibration(version=version, k_table=self.k_table, k_month=self.k_month, snpp_end=self.snpp_end,
                            r=r, r_global=r_global, source=self.source)
 
+    def with_global_r(self, r_global: float, *, version: str) -> "Calibration":
+        """A new calibration version applying one approved factor to every calendar month (spec §5:
+        only the global r is used; per-month values are reported by the fit, never applied).
+        `r_global` is typically `inter_viirs.approved_r_from_fit(...)`."""
+        return self.with_inter_viirs({m: r_global for m in range(1, 13)}, r_global, version=version)
+
     @property
     def fingerprint(self) -> str:
         return self._fingerprint

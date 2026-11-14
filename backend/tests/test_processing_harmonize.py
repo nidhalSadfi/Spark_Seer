@@ -65,6 +65,22 @@ def test_after_snpp_end_noaa20_times_r():
     assert (r.viirs_days, r.n_noaa20, r.n_snpp) == (2, 10, 2) and r.quality_flags == []
 
 
+def test_approved_global_r_applies_one_factor_to_every_month():
+    # Calibration version 1 (spec §5): r_global = 0.983 from the pool fit, per-month values not applied.
+    cal_v1 = CAL.with_global_r(0.983, version="cal-v1")
+    assert all(cal_v1.r_for(m) == 0.983 for m in range(1, 13)) and cal_v1.r_status == "approved"
+    rows = rows_for("VIIRS_NOAA20_NRT", "2026-12-01", 6) + rows_for("VIIRS_NOAA20_NRT", "2026-12-09", 4)
+    staged, s = run(rows, [(*A, 2026, 12)], cal=cal_v1)
+    r = staged.loc[(*A, 2026, 12)]
+    # Post-S-NPP month: 10 NOAA-20 detections x 0.983 = 9.83 (CAL's per-month r[12] = 1.1 is gone).
+    assert r.reference == "NOAA20" and r.harmonized == pytest.approx(9.83) and r.viirs_ref == pytest.approx(9.83)
+    assert s.months["2026-12"]["r"] == 0.983 and r.calibration_version == "cal-v1"
+    staged, _ = run(straddle_rows(), [(*A, 2026, 11)], cal=cal_v1)
+    # Straddling month: 3 S-NPP detections up to the end + 0.983 x 6 NOAA-20 after it = 8.898.
+    assert staged.loc[(*A, 2026, 11)].harmonized == pytest.approx(3 + 0.983 * 6)
+    assert cal_v1.fingerprint != CAL.fingerprint
+
+
 def straddle_rows():
     return (rows_for("VIIRS_SNPP_NRT", "2026-11-01", 2) + rows_for("VIIRS_SNPP_NRT", "2026-11-02", 1)
             + rows_for("VIIRS_SNPP_NRT", "2026-11-03", 1)       # after S-NPP's end: not in the reference
