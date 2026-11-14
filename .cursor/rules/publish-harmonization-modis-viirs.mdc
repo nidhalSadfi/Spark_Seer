@@ -10,7 +10,7 @@ Repo `C:\Users\moham\Spark_Seer`. Remote `origin`: `https://github.com/nidhalSad
 Only publish branch: `harmonization-modis-viirs`. Project files live under `harmonization-modis-viirs/` (FIRMS tool, pipeline, tests, docs, EmberGuard, demo-area boxes, exploration figures).
 
 ```
-# good, on harmonization-modis-viirs, with the auth header below
+# good, on harmonization-modis-viirs, with the one-shot helper below
 git push origin HEAD:harmonization-modis-viirs
 
 # bad
@@ -20,15 +20,16 @@ git push --force
 
 ## Account
 
-Push as **hamagama**. **Medfathallah** gets 403 Permission denied on this repo. `gh` is often not on PATH. WinGet binary: `%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe`. If that `gh` user is not hamagama, run `gh auth switch` to hamagama.
+Push as **hamagama**. **Medfathallah** gets 403 Permission denied on this repo. `gh` is often not on PATH. WinGet binary: `%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe`. If that `gh` user is not hamagama, run `gh auth switch` to hamagama. Never print, log, or store a token.
 
-Git Credential Manager is stored as Medfathallah, so a plain `git push` sends the wrong account. Clear the helper for one command and pass a bearer header. Never print, log, or store the token.
+Git Credential Manager is stored as Medfathallah, so a plain `git push` sends the wrong account. A bearer `http.extraheader` alone still stops locally with `could not read Username` before GitHub sees it. Clear that helper for one command and let `gh auth git-credential` fill hamagama:
 
 ```
-git -c credential.helper= -c http.extraheader="AUTHORIZATION: bearer $(gh auth token)" push origin HEAD:harmonization-modis-viirs
+$gh = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe"
+git -c credential.helper= -c "credential.helper=!`"$gh`" auth git-credential" push origin HEAD:harmonization-modis-viirs
 ```
 
-On this branch, `git push -u origin harmonization-modis-viirs` is the other allowed shape, with the same one-shot auth. Do not `git push origin main`.
+On this branch, `git push -u origin harmonization-modis-viirs` is the other allowed shape, with the same one-shot helper. Do not `git push origin main`.
 
 ## Never
 
