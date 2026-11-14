@@ -91,7 +91,36 @@ def test_g2_catches_a_dropped_or_duplicated_detection():
     dropped = gate_conservation(staged_from(kept.drop(index=5)), kept, KEYS)
     assert not dropped.passed and dropped.detail["families"]["MODIS"] == {"staged": 17, "passed_filter": 18}
     duplicated = gate_conservation(staged_from(pd.concat([kept, kept.iloc[[20]]])), kept, KEYS)
-    assert not duplicated.passed and duplicated.detail["failures"] == {"SNPP_mismatch": {"rows": 1}}
+    assert not duplicated.passed
+    assert duplicated.detail["failures"] == {"SNPP_mismatch": {"rows": 1, "keys": [[73, 18, 2019, 7]]}}
+    assert duplicated.detail["mismatches"] == [[73, 18, 2019, 7, "SNPP", 31, 30]]
+
+
+def test_g2_catches_a_drop_and_a_duplicate_that_cancel_in_the_totals():
+    kept = kept_rows()
+    a = kept.index[(kept.family == "MODIS") & (kept.latitude == 36.6) & (kept.acq_date == date(2019, 7, 5))][0]
+    b = kept.index[(kept.family == "MODIS") & (kept.latitude == 37.1)][0]
+    staged = staged_from(pd.concat([kept.drop(index=a), kept.loc[[b]]]))  # key A loses one, key B gains one
+    result = gate_conservation(staged, kept, KEYS)
+    assert result.detail["families"]["MODIS"] == {"staged": 18, "passed_filter": 18}  # totals agree
+    assert not result.passed
+    assert result.detail["failures"] == {
+        "MODIS_mismatch": {"rows": 2, "keys": [[73, 18, 2019, 7], [74, 19, 2019, 7]]}}
+    assert result.detail["mismatches"] == [[73, 18, 2019, 7, "MODIS", 9, 10], [74, 19, 2019, 7, "MODIS", 6, 5]]
+
+
+def test_g2_recount_does_not_use_the_aggregation(monkeypatch):
+    import processing.grid as grid
+    kept = kept_rows()
+    staged = staged_from(kept)
+
+    def broken(*args, **kwargs):
+        raise AssertionError("G2 must recount on its own")
+    monkeypatch.setattr(grid, "aggregate", broken)
+    monkeypatch.setattr(grid, "with_keys", broken)
+    assert gate_conservation(staged, kept, KEYS).passed
+    missing_row = gate_conservation(staged[staged.cy != 74], kept, KEYS)  # detections but no staged row
+    assert not missing_row.passed and "NOAA20_mismatch" in missing_row.detail["failures"]
 
 
 def test_g2_catches_a_null_count_hiding_detections(good):

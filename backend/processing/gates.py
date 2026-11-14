@@ -1,8 +1,9 @@
 """Hard gates G1-G4 (spec §6; any failure blocks publication) and the soft-flag list.
 
 Each gate re-derives what it checks from its inputs instead of trusting the stage that produced
-the staged rows: G2 recounts the filtered detections, G3 re-derives the reference and coverage
-from the calendar and the fetch coverage, G4 re-looks-up k in the calibration passed in.
+the staged rows: G2 recounts the filtered detections per cell-month and family (without
+grid.aggregate), G3 re-derives the reference and coverage from the calendar and the fetch
+coverage, G4 re-looks-up k in the calibration passed in.
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from .common import (FAMILIES, KEY_COLS, MODIS_UNAVAILABLE, REF_MIXED, REF_MODIS
 from .coverage import as_coverage
 from .drift import DriftSummary
 from .filters import FilterSummary
-from .grid import with_keys
 from .harmonize import RAW_COUNT_COLUMN, STAGED_COLUMNS
 from .params import DEFAULT_PARAMS, ProcessingParams
 
@@ -90,24 +90,44 @@ def _is_int(values: pd.Series) -> pd.Series:
     return (np.isfinite(v) & (v == np.floor(v))) | values.isna()
 
 
+def recount(kept: pd.DataFrame, affected_keys, params: ProcessingParams = DEFAULT_PARAMS) -> pd.DataFrame:
+    """Filtered detections per (cy, cx, year, month, family) inside the affected keys, as column
+    `recount`. Deliberately independent of grid.aggregate: the 0.5° grid rule and the UTC month are
+    restated here, so a bug in the aggregation cannot hide from G2."""
+    keys = normalize_keys(affected_keys)
+    if not len(kept):
+        return pd.DataFrame({c: pd.Series(dtype=object if c == "family" else "int64")
+                             for c in KEY_COLS + ["family", "recount"]})
+    day = pd.to_datetime(kept["acq_date"])
+    d = pd.DataFrame({"cy": np.floor(kept["latitude"].to_numpy(dtype=float) / params.cell_deg).astype("int64"),
+                      "cx": np.floor(kept["longitude"].to_numpy(dtype=float) / params.cell_deg).astype("int64"),
+                      "year": day.dt.year.to_numpy(dtype="int64"), "month": day.dt.month.to_numpy(dtype="int64"),
+                      "family": kept["family"].to_numpy(dtype=object)})
+    n = d.groupby(KEY_COLS + ["family"]).size().rename("recount").reset_index()
+    return n.merge(keys, on=KEY_COLS, how="inner")
+
+
 def gate_conservation(staged: pd.DataFrame, kept: pd.DataFrame, affected_keys,
                       params: ProcessingParams = DEFAULT_PARAMS) -> GateResult:
-    """G2: per sensor family, summed staged counts == detections that passed the filter in the
-    affected cell-months."""
-    keys = normalize_keys(affected_keys)
-    if len(kept):
-        d = with_keys(kept, params).merge(keys, on=KEY_COLS, how="inner")
-        passed = d.family.value_counts()
-    else:
-        passed = pd.Series(dtype="int64")
-    detail, problems = {}, {}
-    for fam in FAMILIES:
-        col = RAW_COUNT_COLUMN[fam]
-        staged_sum = int(pd.to_numeric(staged[col], errors="coerce").fillna(0).sum())
-        n = int(passed.get(fam, 0))
-        detail[fam] = {"staged": staged_sum, "passed_filter": n}
-        problems[f"{fam}_mismatch"] = abs(staged_sum - n)
-    return _result("G2_conservation", problems, {"families": detail})
+    """G2: for every affected cell-month and family, the staged count equals an independent
+    recount of the detections that passed the filter there. A null staged count is accepted only
+    where the recount is 0. Totals per family are reported too."""
+    family_of_col = {col: fam for fam, col in RAW_COUNT_COLUMN.items()}
+    long = staged[KEY_COLS + list(family_of_col)].melt(id_vars=KEY_COLS, var_name="column", value_name="staged")
+    long["family"] = long.pop("column").map(family_of_col)
+    long["staged"] = pd.to_numeric(long["staged"], errors="coerce").astype(float)
+    long = long.astype({c: "int64" for c in KEY_COLS})
+    m = long.merge(recount(kept, affected_keys, params), on=KEY_COLS + ["family"], how="outer")
+    m["recount"] = m["recount"].fillna(0).astype("int64")
+    bad = (m.staged.isna() & (m.recount > 0)) | (m.staged.notna() & (m.staged != m.recount))
+    detail = {"families": {fam: {"staged": int(m.staged[m.family == fam].fillna(0).sum()),
+                                 "passed_filter": int(m.recount[m.family == fam].sum())} for fam in FAMILIES}}
+    wrong = m[bad].sort_values(KEY_COLS + ["family"])
+    detail["mismatches"] = [[int(r.cy), int(r.cx), int(r.year), int(r.month), r.family,
+                             None if pd.isna(r.staged) else int(r.staged), int(r.recount)]
+                            for r in wrong.head(SAMPLE).itertuples(index=False)]
+    problems = {f"{fam}_mismatch": wrong[wrong.family == fam] for fam in FAMILIES}
+    return _result("G2_conservation", problems, detail)
 
 
 def gate_missing_not_zero(staged: pd.DataFrame, calibration: Calibration, coverage,
