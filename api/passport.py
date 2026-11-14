@@ -33,8 +33,9 @@ AREAS_PATH = Path(__file__).resolve().parent.parent / "data" / "areas.json"
 BASELINE_START_YEAR = 2001
 BASELINE_END_YEAR = 2025
 VIIRS_START_YEAR = 2012
-CAL_START = f"{BASELINE_START_YEAR}-01"
-CAL_END = f"{BASELINE_END_YEAR}-12"
+# core.calendar_for_bbox takes int years (it filters H.year.between(start, end)), not "YYYY-MM" strings.
+CAL_START = BASELINE_START_YEAR
+CAL_END = BASELINE_END_YEAR
 
 DEFAULT_LLM_MODEL = "claude-haiku-5-5"
 LLM_TIMEOUT_S = 15.0

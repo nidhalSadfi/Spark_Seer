@@ -14,10 +14,6 @@ import make_fake_data
 from api import weather as wx
 from api.main import app
 
-CORE_INTERFACE_BUG = (
-    "api/passport.py passes CAL_START='2001-01' / CAL_END='2025-12' to core.calendar_for_bbox, "
-    "which takes int years (TypeError). Fix in passport.py: CAL_START = BASELINE_START_YEAR and "
-    "CAL_END = BASELINE_END_YEAR. Then delete this xfail marker.")
 OPEN_METEO = json.loads((Path(__file__).parent / "fixtures" / "open_meteo_sample.json").read_text())
 
 
@@ -40,7 +36,6 @@ def test_teammate_routes_are_mounted(client):
     assert "post" in paths["/investigate"] and "get" in paths["/weather"]
 
 
-@pytest.mark.xfail(strict=True, reason=CORE_INTERFACE_BUG)
 def test_investigate_matches_calendar(client):
     r = client.post("/investigate", json={"area": "bizerte", "year": 2008, "month": 7})
     assert r.status_code == 200
@@ -51,7 +46,6 @@ def test_investigate_matches_calendar(client):
     assert p["model_quality"]["synthetic"] is True and p["ai_text"] is None
 
 
-@pytest.mark.xfail(strict=True, reason=CORE_INTERFACE_BUG)
 def test_weather_historical_context_uses_calendar(client):
     body = client.get("/weather?area=bizerte").json()
     hist = body["historical_context"]
