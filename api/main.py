@@ -6,6 +6,7 @@ Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLa
 """
 import importlib.util
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -60,6 +61,8 @@ def load_meteomatics():
 
 
 # Mounted under /meteomatics: its own GET /weather would clash with api/weather.py's.
+# Its fire layer reads NASA_FIRMS_CSV: default to our real export (scripts/export_fires.py).
+os.environ.setdefault("NASA_FIRMS_CSV", str(ROOT / "data" / "fires.csv"))
 meteomatics = load_meteomatics()
 if meteomatics is not None:
     app.include_router(meteomatics.router, prefix="/meteomatics", tags=["meteomatics"])
