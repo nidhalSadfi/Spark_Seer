@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.firms_session.json
+submissions.jsonl
+data/
+*.part
