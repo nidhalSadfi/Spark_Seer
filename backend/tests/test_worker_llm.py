@@ -1,5 +1,6 @@
 """worker/llm.py: crewai import hygiene, the CrewAI 1.15 internals it relies on, the OpenRouter
-LLM it builds (never called), error classification, the fallback loop and key redaction.
+LLM it builds (never called), error classification (including OpenRouter's daily-quota 429), the
+fallback loop, key redaction, the per-attempt request guard and the free-model quota check.
 
 No network: sockets are blocked (llm_stub.no_network) and nothing calls OpenRouter. The key is fake.
 """
@@ -15,11 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from llm_stub import FAKE_KEY, NetworkBlocked, crewai_storage, no_network  # noqa: F401 - fixtures
+from llm_stub import (DAILY_QUOTA_BODY, FAKE_KEY, UPSTREAM_BODY, NetworkBlocked, crewai_storage,  # noqa: F401
+                      no_network, rate_limit_error)
 from settings import Settings
 from worker import llm
-from worker.llm import (CREWAI_ENV, OUTCOMES, AttemptRecord, InvalidOutput, build_llm, classify_error,
-                        crewai_run_scope, import_crewai, make_redactor, run_with_fallback)
+from worker.llm import (CREWAI_ENV, OUTCOMES, AttemptRecord, InvalidOutput, RequestRefused, build_llm,
+                        classify_error, crewai_run_scope, free_model_quota, import_crewai, limit_requests,
+                        make_redactor, run_with_fallback)
 
 BACKEND = Path(__file__).resolve().parent.parent
 T0 = datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc)
@@ -171,6 +174,11 @@ def _wrapped(outer, inner):
     (lambda: TimeoutError("slow"), "timeout"),
     (lambda: _sdk("rate"), "rate_limited"),
     (lambda: _wrapped(RuntimeError("wrapped"), _sdk("rate")), "rate_limited"),
+    (lambda: rate_limit_error(UPSTREAM_BODY), "rate_limited"),                 # a model's upstream limit
+    (lambda: rate_limit_error(DAILY_QUOTA_BODY), "quota_exhausted"),           # the key's daily free limit
+    (lambda: _wrapped(RuntimeError("LLM call failed"), rate_limit_error(DAILY_QUOTA_BODY)), "quota_exhausted"),
+    (lambda: RuntimeError("free-models-per-day"), "error"),                    # the marker alone is not a 429
+    (lambda: RequestRefused("second request"), "invalid_output"),
     (lambda: _sdk("server"), "http_error"),
     (lambda: _sdk("connection"), "http_error"),
     (lambda: InvalidOutput("bad verdict"), "invalid_output"),
@@ -258,3 +266,134 @@ def test_the_key_never_reaches_attempts_or_logs(caplog, capfd):
     assert FAKE_KEY not in out + err
     # The filter is removed afterwards: it only covers the review.
     assert all(not isinstance(f, llm._RedactFilter) for h in logging.getLogger().handlers for f in h.filters)
+
+
+# ----------------------------------------------------------------------------- daily quota 429
+
+def test_fallback_stops_after_a_daily_quota_429(caplog):
+    tried = []
+
+    def run_one(ctx):
+        tried.append(ctx.model)
+        raise rate_limit_error(DAILY_QUOTA_BODY if ctx.model == "b" else UPSTREAM_BODY)
+
+    with caplog.at_level(logging.WARNING, logger="worker.llm"):
+        result, attempts = run_with_fallback(["a", "b", "c", "d"], run_one, deadline_s=10)
+    assert result is None and tried == ["a", "b"]   # an upstream 429 moves on; the daily quota stops the chain
+    assert [a.outcome for a in attempts] == ["rate_limited", "quota_exhausted"]
+    assert attempts[1].error_class == "RateLimitError" and "free-models-per-day" in attempts[1].error
+    assert any(r.getMessage().startswith("daily free-model quota exhausted") and r.skipped == 2
+               for r in caplog.records)
+
+
+# ----------------------------------------------------------------------------- request guard
+
+class FakeAgent:
+    def __init__(self, role):
+        self.role = role
+
+
+class FakeLLM:
+    def __init__(self):
+        self.sent = []
+
+    def call(self, messages, tools=None, callbacks=None, available_functions=None, from_task=None, from_agent=None,
+             response_model=None, **kwargs):
+        self.sent.append(getattr(from_agent, "role", None))
+        return "Final Answer: ok"
+
+
+def test_limit_requests_allows_one_request_per_agent_and_nothing_else():
+    fake = FakeLLM()
+    sent = limit_requests(fake, ("A", "B"))
+    assert fake.call([], from_agent=FakeAgent("A")) == "Final Answer: ok"
+    with pytest.raises(RequestRefused, match="second request"):
+        fake.call([], from_agent=FakeAgent("A"))
+    with pytest.raises(RequestRefused, match="outside an agent"):
+        fake.call([], callbacks=[])                       # how CrewAI forces a final answer
+    with pytest.raises(RequestRefused, match="outside an agent"):
+        fake.call([], from_agent=FakeAgent("Someone else"))
+    fake.call([], from_agent=FakeAgent("B"))
+    assert sent == ["A", "B"] and fake.sent == ["A", "B"]   # refused requests never reached the client
+    assert classify_error(RequestRefused("x")) == "invalid_output"
+
+
+def test_limit_requests_wraps_the_real_openrouter_llm_without_a_request():
+    import asyncio
+
+    s = Settings(openrouter_api_key=FAKE_KEY, openrouter_models=("vendor/model",))
+    model = build_llm("vendor/model", s)
+    limit_requests(model, ("A",))
+    with pytest.raises(RequestRefused):
+        model.call([{"role": "user", "content": "hi"}], callbacks=[])
+    with pytest.raises(RequestRefused):
+        asyncio.run(model.acall([{"role": "user", "content": "hi"}]))
+    assert model.model == "vendor/model"   # still the same pydantic model, fields untouched
+
+
+# ----------------------------------------------------------------------------- quota check
+
+def _resp(status=200, payload=None, content=None):
+    import httpx
+    req = httpx.Request("GET", "https://openrouter.example/api/v1/key")
+    if content is not None:
+        return httpx.Response(status, content=content, request=req)
+    return httpx.Response(status, json=payload, request=req)
+
+
+QUOTA_SETTINGS = Settings(openrouter_api_key=FAKE_KEY, openrouter_models=("vendor/model",),
+                          openrouter_base_url="https://openrouter.example/api/v1/")
+
+
+def test_free_model_quota_reads_the_key_endpoint():
+    seen = []
+
+    def get(url, headers, timeout):
+        seen.append((url, headers, timeout))
+        return _resp(payload={"data": {"label": "x", "free_model_daily_requests": {"limit": 50, "remaining": 47}}})
+
+    assert free_model_quota(QUOTA_SETTINGS, http_get=get) == 47
+    assert seen == [("https://openrouter.example/api/v1/key", {"Authorization": f"Bearer {FAKE_KEY}"}, 10.0)]
+
+
+def _raises(exc):
+    def get(url, headers, timeout):
+        raise exc
+    return get
+
+
+def _timeout():
+    import httpx
+    return httpx.ReadTimeout("timed out", request=httpx.Request("GET", "https://openrouter.example/api/v1/key"))
+
+
+@pytest.mark.parametrize("get", [
+    lambda url, headers, timeout: _resp(401, {"error": {"message": f"bad key {FAKE_KEY}"}}),
+    lambda url, headers, timeout: _resp(500, {"error": "down"}),
+    lambda url, headers, timeout: _resp(content=b"<html>not json</html>"),
+    lambda url, headers, timeout: _resp(payload={"data": {}}),
+    lambda url, headers, timeout: _resp(payload={"data": {"free_model_daily_requests": {"remaining": "12"}}}),
+    lambda url, headers, timeout: _resp(payload={"data": {"free_model_daily_requests": {"remaining": True}}}),
+    lambda url, headers, timeout: _resp(payload={"data": {"free_model_daily_requests": {"remaining": None}}}),
+    lambda url, headers, timeout: _resp(payload=[1, 2]),
+    _raises(_timeout()),
+    _raises(RuntimeError(f"connection reset for {FAKE_KEY}")),
+])
+def test_free_model_quota_is_none_on_any_failure_and_never_logs_the_key(get, caplog, capfd):
+    with caplog.at_level(logging.DEBUG):
+        assert free_model_quota(QUOTA_SETTINGS, http_get=get) is None
+    assert any(r.getMessage() == "free-model quota check failed" for r in caplog.records)
+    assert FAKE_KEY not in caplog.text and "sk-or-" not in caplog.text
+    out, err = capfd.readouterr()
+    assert FAKE_KEY not in out + err
+
+
+def test_free_model_quota_without_a_key_makes_no_request():
+    def get(*a, **k):
+        raise AssertionError("requested")
+
+    assert free_model_quota(Settings(), http_get=get) is None
+
+
+def test_free_model_quota_default_client_meets_the_blocked_network():
+    assert free_model_quota(QUOTA_SETTINGS) is None   # httpx.get, sockets blocked: a failure, so None

@@ -48,6 +48,8 @@ class Settings:
     openrouter_base_url: str = DEFAULT_OPENROUTER_BASE_URL
     openrouter_timeout_s: float = 60.0
     openrouter_retries: int = 1
+    # Read the key's remaining free-model requests before a review (spec §7 free-tier budget); off for paid keys.
+    openrouter_quota_check: bool = True
     review_deadline_s: float = 300.0
     review_summary_max_chars: int = 8000
 
@@ -76,6 +78,8 @@ class Settings:
         _check(self.openrouter_timeout_s > 0 and math.isfinite(self.openrouter_timeout_s), "OPENROUTER_TIMEOUT_S",
                "must be a number > 0", self.openrouter_timeout_s)
         _check(self.openrouter_retries >= 0, "OPENROUTER_RETRIES", "must be an integer >= 0", self.openrouter_retries)
+        _check(isinstance(self.openrouter_quota_check, bool), "OPENROUTER_QUOTA_CHECK", "must be true or false",
+               self.openrouter_quota_check)
         _check(self.review_deadline_s > 0 and math.isfinite(self.review_deadline_s), "REVIEW_DEADLINE_S",
                "must be a number > 0", self.review_deadline_s)
         # Below ~1000 characters a summary cannot even hold the gate results.
@@ -125,6 +129,8 @@ class Settings:
             kw["openrouter_timeout_s"] = _number("OPENROUTER_TIMEOUT_S", v, float)
         if (v := _get("OPENROUTER_RETRIES")) is not None:
             kw["openrouter_retries"] = _number("OPENROUTER_RETRIES", v, int)
+        if (v := _get("OPENROUTER_QUOTA_CHECK")) is not None:
+            kw["openrouter_quota_check"] = _bool("OPENROUTER_QUOTA_CHECK", v)
         if (v := _get("REVIEW_DEADLINE_S")) is not None:
             kw["review_deadline_s"] = _number("REVIEW_DEADLINE_S", v, float)
         if (v := _get("REVIEW_SUMMARY_MAX_CHARS")) is not None:
@@ -142,6 +148,14 @@ def _number(name: str, raw: str, kind: type) -> float | int:
         return kind(raw)
     except ValueError:
         raise SettingsError(f"{name} must be {'an integer' if kind is int else 'a number'}, got {raw!r}") from None
+
+
+def _bool(name: str, raw: str) -> bool:
+    """Strict: only "true" or "false" (any case); anything else is an error, not a guess."""
+    value = raw.strip().lower()
+    if value not in ("true", "false"):
+        raise SettingsError(f"{name} must be true or false, got {raw!r}")
+    return value == "true"
 
 
 def _parse_bbox(raw: str) -> Bbox:

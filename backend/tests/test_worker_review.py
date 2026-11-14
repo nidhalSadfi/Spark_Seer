@@ -1,6 +1,7 @@
 """worker/review.py on SYNTHETIC data with stub models (llm_stub): the flow's fixed step order and
 its equality with processing.process(), the fallback chain, the deadline, decide() (downgrade
-only), validate_verdict (I8), the agents' inputs, the disabled path (no crewai) and key hygiene.
+only), validate_verdict (I8), the agents' inputs, the free-tier budget (at most three requests per
+attempt, the quota check, the daily-quota 429), the disabled path (no crewai) and key hygiene.
 
 No network: sockets are blocked (llm_stub.no_network); no test calls OpenRouter; the key is fake.
 """
@@ -19,14 +20,15 @@ import pytest
 
 import test_processing_pipeline as synth
 from api.passport import allowed_numbers
-from llm_stub import FAKE_KEY, NetworkBlocked, Script, crewai_storage, no_network  # noqa: F401 - fixtures
+from llm_stub import FAKE_KEY, MALFORMED, NetworkBlocked, Script, crewai_storage, no_network  # noqa: F401 - fixtures
 from processing import pipeline
 from processing.gates import GateResult
 from processing.pipeline import STAGE_ORDER, ProcessingRun, process
 from settings import Settings
 from worker import review
 from worker.llm import InvalidOutput
-from worker.review import (STEPS, TRUNCATED, Verdict, decide, review_payloads, run_processing, validate_verdict)
+from worker.review import (REQUESTS_PER_ATTEMPT, REVIEWER_ROLES, STEPS, TRUNCATED, Verdict, decide, review_payloads,
+                           run_processing, task_descriptions, validate_verdict)
 
 BACKEND = Path(__file__).resolve().parent.parent
 REQUIREMENTS = BACKEND / "requirements.txt"
@@ -36,6 +38,8 @@ NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 def settings(*models, **kw) -> Settings:
+    # The quota check is off unless a test turns it on (and then injects it, or expects it to fail).
+    kw.setdefault("openrouter_quota_check", False)
     return Settings(openrouter_api_key=FAKE_KEY if models else None, openrouter_models=models, **kw)
 
 
@@ -243,6 +247,9 @@ SHOWN = ['{"kept_by_family":{"MODIS":17},"months":{"2026-11":{"complete":false}}
     '{"decision": "approve", "reasons": ["drift 12.34 is fine"]}',
     '```json\n{"decision": "reject", "reasons": ["no numbers here"], "flagged_keys": []}\n```',
     Verdict(decision="approve", reasons=["17 kept"]),
+    # free models often wrap the JSON in prose; an invalid object before the verdict is skipped
+    'Here is my verdict: {"decision": "approve", "reasons": ["gates passed"]} Hope this helps.',
+    'Notes {"x": 1} then\n```json\n{"decision": "hold", "reasons": ["2026-11 partial"], "flagged_keys": []}\n```',
 ])
 def test_valid_verdicts(raw):
     v = validate_verdict(raw, KEYS, SHOWN)
@@ -258,6 +265,9 @@ def test_valid_verdicts(raw):
     ({"decision": "hold", "reasons": [], "flagged_keys": [[73, 18, 2026, 12]]}, "outside the affected set"),
     ({"decision": "approve", "reasons": ["18 MODIS detections"]}, "I8"),
     ({"decision": "approve", "reasons": ["drift 12.4%"]}, "I8"),
+    # an embedded verdict gets the same checks as a bare one
+    ('Verdict: {"decision": "approve", "reasons": ["drift 12.4%"]}', "I8"),
+    ('My answer: {"decision": "maybe", "reasons": []}', "does not parse"),
 ])
 def test_invalid_verdicts(raw, match):
     with pytest.raises(InvalidOutput, match=match):
@@ -281,12 +291,14 @@ def test_agents_see_summaries_only_within_the_cap():
     for text in payloads.values():
         assert len(text) <= cap
         assert not any(m in text for m in RAW_ROW_MARKERS)
-    # Every tool result an agent got is one of those capped payloads; prompts carry no raw rows.
+    # Each agent's prompt carries its own capped payload; prompts carry no raw rows.
     for call in script.calls:
         assert not any(m in call.text for m in RAW_ROW_MARKERS), call.role
     fingerprint = synth.CAL.fingerprint
     assert all(fingerprint not in c.text and fingerprint[:12] not in c.text for c in script.calls)
-    assert any(payloads["validation"] in c.text for c in script.calls)
+    by_role = {c.role: c.text for c in script.calls}
+    for name, role in zip(("filter", "harmonization", "validation"), REVIEWER_ROLES):
+        assert payloads[name] in by_role[role]
 
 
 def test_truncation_is_marked_and_limits_the_i8_numbers():
@@ -371,3 +383,155 @@ def test_the_key_never_appears_in_attempts_steps_or_logs(caplog, capfd):
     assert FAKE_KEY not in caplog.text
     stdout, stderr = capfd.readouterr()
     assert FAKE_KEY not in stdout + stderr
+
+
+# ----------------------------------------------------------------------------- free-tier budget (spec §7)
+
+DIGIT = re.compile(r"\d")
+
+
+def calls_by_model(script: Script) -> dict[str, list[str | None]]:
+    out: dict[str, list[str | None]] = {}
+    for c in script.calls:
+        out.setdefault(c.model, []).append(c.role)
+    return out
+
+
+def test_well_formed_answers_cost_exactly_three_requests():
+    script = Script({"m": "ok"})
+    out = run(script, ("m",))
+    assert (out.decision, out.ai_review) == ("approve", "completed")
+    assert REQUESTS_PER_ATTEMPT == 3
+    assert calls_by_model(script) == {"m": list(REVIEWER_ROLES)}   # one answer per agent, no tool round trip
+    assert all("Action:" not in c.text for c in script.calls)        # no tools are offered to the agents
+
+
+# Calls each malformed behaviour costs (every agent's answer is malformed):
+# - garbage, no_final_answer, nonsense: CrewAI takes any text as the final answer (format_answer's
+#   fallback), so each agent answers once and the verdict does not parse: 3 calls.
+# - empty: CrewAI asks again once (_call_llm_retrying_empty); limit_requests refuses: 1 call.
+# - action: CrewAI would force a final answer (handle_max_iterations_exceeded); refused: 1 call.
+@pytest.mark.parametrize("behaviour,expected_calls", [("garbage", 3), ("no_final_answer", 3), ("nonsense", 3),
+                                                      ("empty", 1), ("action", 1)])
+def test_malformed_answers_cost_at_most_three_requests(behaviour, expected_calls):
+    script = Script({"bad": behaviour, "good": "ok"})
+    out = run(script, ("bad", "good"))
+    calls = calls_by_model(script)
+    assert len(calls["bad"]) == expected_calls <= REQUESTS_PER_ATTEMPT
+    assert all(role is not None for role in calls["bad"])            # nothing was sent outside an agent's answer
+    assert [a["outcome"] for a in out.attempts] == ["invalid_output", "ok"]
+    assert out.attempts[0]["error_class"] in ("InvalidOutput", "RequestRefused")
+    assert calls["good"] == list(REVIEWER_ROLES)                     # the next model is tried, three calls again
+    out = run(Script({"bad": behaviour}), ("bad",))
+    assert [a["outcome"] for a in out.attempts] == ["invalid_output"]
+    assert (out.decision, out.ai_review, out.verdict) == ("approve", "unavailable", None)   # D3
+
+
+@pytest.mark.parametrize("behaviour,unguarded_calls", [("action", 6), ("empty", 2)])
+def test_crewai_would_send_more_requests_without_the_guard(monkeypatch, behaviour, unguarded_calls):
+    """Documents the CrewAI 1.15 mechanisms limit_requests bounds: if this changes, re-check it."""
+    monkeypatch.setattr(review, "limit_requests", lambda llm, roles: [])
+    script = Script({"bad": behaviour})
+    run(script, ("bad",))
+    assert len(script.calls) == unguarded_calls
+    if behaviour == "action":   # one forced final answer per agent, sent without from_agent
+        assert [c.role for c in script.calls][1::2] == [None, None, None]
+
+
+def test_task_wording_has_no_digits_and_the_i8_set_is_the_prompt_payloads(monkeypatch):
+    res = process(synth.detections(), KEYS, synth.CAL, **inputs())
+    payloads = review_payloads(res, KEYS, 1000)
+    descriptions = task_descriptions(payloads)
+    for name, text in descriptions.items():
+        assert text.endswith(payloads[name])
+        assert not DIGIT.search(text[:-len(payloads[name])]), name
+    for role, goal, wording in review._REVIEWERS.values():
+        assert not DIGIT.search(role + goal + wording)
+    assert not DIGIT.search(review._COMMON_RULES + review._PAYLOAD_HEADER + review._VERDICT_FORMAT)
+
+    seen = []
+    real = review.validate_verdict
+
+    def spy(raw, affected_keys, tool_results):
+        seen.append(list(tool_results))
+        return real(raw, affected_keys, tool_results)
+
+    monkeypatch.setattr(review, "validate_verdict", spy)
+    script = Script({"m": "ok"})
+    run(script, settings=settings("m", review_summary_max_chars=1000))
+    assert seen == [list(payloads.values())]   # exactly the capped payload texts, nothing CrewAI added
+    for name, role in zip(("filter", "harmonization", "validation"), REVIEWER_ROLES):
+        assert descriptions[name] in next(c.text for c in script.calls if c.role == role)
+
+
+def test_a_number_only_in_another_reviewers_payload_is_allowed():
+    res = process(synth.detections(), KEYS, synth.CAL, **inputs())
+    payloads = review_payloads(res, KEYS, 10**6)
+    only_filter = [x for x in NUMBER.findall(payloads["filter"])
+                   if x not in NUMBER.findall(payloads["validation"]) and "." not in x and int(x) > 9]
+    assert only_filter
+    verdict = {"decision": "hold", "reasons": [f"{only_filter[0]} detections kept"], "flagged_keys": []}
+    out = run(Script({"m": "ok"}, verdicts={"m": verdict}), ("m",))
+    assert (out.decision, out.ai_review) == ("hold", "completed")
+
+
+@pytest.mark.parametrize("remaining", [0, 1, 2])
+def test_too_little_daily_quota_skips_the_review(remaining):
+    script, checked = Script({"m": "ok"}), []
+
+    def quota(s):
+        checked.append(s.openrouter_api_key)
+        return remaining
+
+    out = run(script, settings=settings("m", "n", openrouter_quota_check=True), quota_check=quota)
+    assert checked == [FAKE_KEY] and script.built == [] and script.calls == []   # no model was built
+    assert (out.decision, out.ai_review, out.verdict, out.attempts) == ("approve", "unavailable", None, ())
+    rev = next(s for s in out.steps if s["name"] == "review")["summary"]
+    assert rev == {"ai_review": "unavailable", "models": 2, "attempts": 0, "model": None, "verdict": None,
+                   "reason": "daily_quota", "quota_remaining": remaining, "requests_per_attempt": 3}
+    assert next(s for s in out.steps if s["name"] == "decide")["summary"]["basis"] == "gates_only"
+
+
+@pytest.mark.parametrize("remaining", [3, 50, None])
+def test_enough_or_unknown_quota_runs_the_review(remaining):
+    script = Script({"m": "ok"})
+    out = run(script, settings=settings("m", openrouter_quota_check=True), quota_check=lambda s: remaining)
+    assert (out.decision, out.ai_review) == ("approve", "completed") and len(script.calls) == 3
+    rev = next(s for s in out.steps if s["name"] == "review")["summary"]
+    assert rev["quota_remaining"] == remaining and "reason" not in rev
+
+
+def test_a_failing_quota_check_lets_the_review_run():
+    # Default checker (llm.free_model_quota) against the blocked network: it returns None.
+    script = Script({"m": "ok"})
+    out = run(script, settings=settings("m", openrouter_quota_check=True))
+    assert (out.decision, out.ai_review) == ("approve", "completed")
+    assert next(s for s in out.steps if s["name"] == "review")["summary"]["quota_remaining"] is None
+
+
+def test_quota_check_off_or_review_disabled_never_checks():
+    def never(s):
+        raise AssertionError("quota checked")
+
+    out = run(Script({"m": "ok"}), settings=settings("m", openrouter_quota_check=False), quota_check=never)
+    assert out.ai_review == "completed"
+    out = run(None, settings=settings(openrouter_quota_check=True), quota_check=never)
+    assert out.ai_review == "disabled"
+
+
+def test_a_daily_quota_429_stops_the_chain():
+    script = Script({"a": "quota", "b": "ok"})
+    out = run(script, ("a", "b"))
+    assert [(a["model"], a["outcome"], a["error_class"]) for a in out.attempts] == [
+        ("a", "quota_exhausted", "RateLimitError")]
+    assert [m for m, _ in script.built] == ["a"]   # b is not built: the quota is shared by every free model
+    assert (out.decision, out.ai_review) == ("approve", "unavailable")
+    assert next(s for s in out.steps if s["name"] == "review")["summary"]["reason"] == "daily_quota"
+
+
+def test_an_upstream_429_moves_on_to_the_next_model():
+    script = Script({"a": "upstream_429", "b": "ok"})
+    out = run(script, ("a", "b"))
+    assert [(a["model"], a["outcome"]) for a in out.attempts] == [("a", "rate_limited"), ("b", "ok")]
+    assert (out.decision, out.ai_review) == ("approve", "completed")
+    assert "reason" not in next(s for s in out.steps if s["name"] == "review")["summary"]

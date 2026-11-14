@@ -11,7 +11,8 @@ ENV_VARS = ("DATABASE_URL", "FIRMS_MAP_KEY", "FIRMS_MAP_KEY_1", "FIRMS_POLL_INTE
             "FIRMS_MAX_BACKFILL_DAYS", "FIRMS_RAW_DIR", "WORKER_LEASE_SECONDS", "WORKER_TICK_SECONDS",
             "RECONCILE_DAY_OF_MONTH", "COUNTRY_BOUNDARY_FILE", "STATIC_MASK_FILE", "DRIFT_WARN_PCT",
             "DRIFT_MIN_COUNT", "OPENROUTER_API_KEY", "OPENROUTER_MODELS", "OPENROUTER_BASE_URL",
-            "OPENROUTER_TIMEOUT_S", "OPENROUTER_RETRIES", "REVIEW_DEADLINE_S", "REVIEW_SUMMARY_MAX_CHARS")
+            "OPENROUTER_TIMEOUT_S", "OPENROUTER_RETRIES", "OPENROUTER_QUOTA_CHECK", "REVIEW_DEADLINE_S",
+            "REVIEW_SUMMARY_MAX_CHARS")
 FAKE_OPENROUTER_KEY = "sk-or-v1-0000000000000000000000000000000000000000000000000000000000fake"
 
 
@@ -123,6 +124,22 @@ def test_review_defaults():
     assert s.openrouter_base_url == "https://openrouter.ai/api/v1"
     assert (s.openrouter_timeout_s, s.openrouter_retries) == (60.0, 1)
     assert (s.review_deadline_s, s.review_summary_max_chars) == (300.0, 8000)
+    assert s.openrouter_quota_check is True   # free tier by default (spec §7)
+
+
+@pytest.mark.parametrize("raw,value", [("true", True), ("false", False), (" FALSE ", False), ("True", True)])
+def test_quota_check_parses_true_or_false(monkeypatch, raw, value):
+    monkeypatch.setenv("OPENROUTER_QUOTA_CHECK", raw)
+    assert Settings.from_env().openrouter_quota_check is value
+
+
+@pytest.mark.parametrize("raw", ["yes", "no", "1", "0", "on", "off", "flase"])
+def test_quota_check_rejects_anything_else(monkeypatch, raw):
+    monkeypatch.setenv("OPENROUTER_QUOTA_CHECK", raw)
+    with pytest.raises(SettingsError, match="OPENROUTER_QUOTA_CHECK must be true or false"):
+        Settings.from_env()
+    with pytest.raises(SettingsError, match="OPENROUTER_QUOTA_CHECK"):
+        Settings(openrouter_quota_check="false")
 
 
 def test_review_env_overrides(monkeypatch):

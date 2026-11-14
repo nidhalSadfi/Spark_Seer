@@ -66,6 +66,13 @@ whose verdict can only downgrade the deterministic hard gates (spec §7). Config
 - `REVIEW_DEADLINE_S`: time budget for the whole review; no model is started after it. If every
   model fails, a run that passed the gates is published with `ai_review = "unavailable"`.
 - `REVIEW_SUMMARY_MAX_CHARS`: cap on each summary an agent is shown.
+- `OPENROUTER_QUOTA_CHECK` (default `true`): check the key's remaining free-model requests first;
+  set `false` for a paid key.
+
+Free tier (50 free-model requests a day per key, shared by 8 polls): one attempt costs at most 3
+requests (summaries are in the prompts, one answer per agent). With fewer than 3 left the review is
+skipped (`reason: "daily_quota"`), and a daily-quota 429 stops the model chain; either way a run
+that passed the gates is still published (D3, `ai_review = "unavailable"`).
 
 Before importing CrewAI the worker switches off its telemetry, tracing, version check and `.env`
 loading, and points its storage at `CREWAI_STORAGE_DIR` (default: a per-user directory under the
@@ -83,6 +90,20 @@ FIRMS yearly country CSVs for Tunisia and Algeria exist (run from `backend/`):
 python -m processing.build_mask data/raw data/static_mask.json          # then STATIC_MASK_FILE=...
 python -m processing.fit_inter_viirs data/raw data/inter_viirs_fit.json  # proposed r (S-NPP / NOAA-20)
 ```
+
+The inter-VIIRS factor r is fitted on a Mediterranean pool and validated on Tunisia + Algeria
+(spec §5). Download the pool (S-NPP and NOAA-20 yearly country files, about 105 MB), then fit:
+
+```bash
+python -m firms_tool archive --sensors viirs_snpp viirs_noaa20 --years 2019-2025 \
+    --countries Morocco Spain Portugal Italy Greece Turkey --out <pool_dir>
+python -m processing.fit_inter_viirs <pool_dir> data/inter_viirs_fit.json --validate-dir data/raw
+```
+
+With `--validate-dir`, r is fitted on the pool over the train years and validated on `data/raw`
+over the test years; the output adds the validation errors (r = 1, global r, per-month r), the
+pool's file list, hash and countries, and `approved_r` from the acceptance rule (the global r if it
+beats r = 1, else 1.0). Only the global r is applied (`Calibration.with_global_r`).
 
 The country clip needs a boundary GeoJSON (`COUNTRY_BOUNDARY_FILE`); none is committed yet. While
 the mask or boundary file is unset, the run reports that rule as disabled.

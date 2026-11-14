@@ -5,11 +5,14 @@ telemetry, tracing, version check and .env loading off and keeps its files out o
 directory. Nothing here imports crewai at module import time, so `import worker.llm` stays cheap
 and the API never pulls it in (I1).
 
-`run_with_fallback` tries `OPENROUTER_MODELS` in order until one review succeeds or
-`REVIEW_DEADLINE_S` is used up, and records every attempt (model, start, latency, outcome, error
-class, redacted message, token counts). The OpenRouter API key never enters an attempt record,
-a stored message or a log line: messages are redacted and log records are filtered while a
-review runs.
+`run_with_fallback` tries `OPENROUTER_MODELS` in order until one review succeeds, the key's daily
+free-model quota runs out (a `quota_exhausted` 429) or `REVIEW_DEADLINE_S` is used up, and records
+every attempt (model, start, latency, outcome, error class, redacted message, token counts). The
+OpenRouter API key never enters an attempt record, a stored message or a log line: messages are
+redacted and log records are filtered while a review runs.
+
+Free-tier budget (spec §7): `limit_requests` caps what one attempt may send (one request per
+agent), and `free_model_quota` reads how many free-model requests the key has left today.
 
 CrewAI hooks used here are private (`crewai.llms.retry._active_llm_rate_limit_retry`,
 `crewai_core.settings.DEFAULT_CONFIG_PATH`, `TokenManager._get_secure_storage_path`), hence the
@@ -18,6 +21,7 @@ CrewAI hooks used here are private (`crewai.llms.retry._active_llm_rate_limit_re
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -28,7 +32,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Sequence, TypeVar
+from typing import Any, Callable, Collection, Iterable, Iterator, Sequence, TypeVar
 
 log = logging.getLogger("worker.llm")
 
@@ -48,8 +52,14 @@ CREWAI_ENV = {
 # because the temp dir is shared.
 CREWAI_STORAGE_DEFAULT = Path(tempfile.gettempdir()) / f"emberguard-crewai-{getattr(os, 'getuid', lambda: 0)()}"
 
-OUTCOMES = ("ok", "timeout", "rate_limited", "http_error", "invalid_output", "error")
+OUTCOMES = ("ok", "timeout", "rate_limited", "quota_exhausted", "http_error", "invalid_output", "error")
 MAX_ERROR_CHARS = 300
+# OpenRouter's 429 for the key's daily free-model limit says "Rate limit exceeded: free-models-per-day"
+# (a per-model upstream limit says "... is temporarily rate-limited upstream" instead). No other
+# daily-limit wording is documented in the OpenAI SDK, CrewAI or this repository, so only this marker
+# counts: any other 429 stays `rate_limited` and the next model is tried.
+DAILY_QUOTA_MARKERS = ("free-models-per-day",)
+QUOTA_TIMEOUT_S = 10.0
 # OpenRouter keys look like sk-or-v1-<hex>; redacted even if they are not the configured key.
 _KEY_PATTERN = re.compile(r"sk-or-[A-Za-z0-9_-]{8,}")
 _TIMEOUT_NAMES = ("APITimeoutError", "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout",
@@ -62,6 +72,11 @@ T = TypeVar("T")
 
 class InvalidOutput(ValueError):
     """The model answered, but its verdict is unusable (does not parse, foreign key, invented number)."""
+
+
+class RequestRefused(InvalidOutput):
+    """An attempt tried to send a request beyond its budget (see `limit_requests`). Raised before
+    anything is sent; it means an answer was empty or malformed, so it counts as invalid output."""
 
 
 def crewai_storage_dir() -> Path:
@@ -270,11 +285,22 @@ def classify_error(exc: BaseException) -> str:
     if any(isinstance(e, TimeoutError) or any(n in _TIMEOUT_NAMES for n in ns) for e, ns in zip(chain, names)):
         return "timeout"
     if any(_status(e) == 429 or "RateLimitError" in ns for e, ns in zip(chain, names)):
-        return "rate_limited"
+        return "quota_exhausted" if any(_says_daily_quota(e) for e in chain) else "rate_limited"
     if any(_status(e) is not None or isinstance(e, ConnectionError) or any(n in _HTTP_NAMES for n in ns)
            for e, ns in zip(chain, names)):
         return "http_error"
     return "error"
+
+
+def _says_daily_quota(e: BaseException) -> bool:
+    """Whether an exception's message or (OpenAI SDK) body names OpenRouter's daily free-model limit."""
+    body = getattr(e, "body", None)
+    try:
+        body_text = json.dumps(body, default=str) if body is not None else ""
+    except (TypeError, ValueError):
+        body_text = str(body)
+    text = f"{e} {body_text}".lower()
+    return any(m in text for m in DAILY_QUOTA_MARKERS)
 
 
 def _short(text: str, redact: Callable[[str], str]) -> str:
@@ -292,8 +318,10 @@ def run_with_fallback(models: Sequence[str], run_one: Callable[[AttemptContext],
     """Try `models` in order; return (first successful result, attempts) or (None, attempts).
 
     A model fails on any exception from `run_one` (timeout, rate limit, HTTP error, InvalidOutput,
-    anything else) and the next one is tried. No model is started once `deadline_s` seconds have
-    passed since the first; each attempt gets the time that is left as `ctx.budget_s`.
+    anything else) and the next one is tried, except after a `quota_exhausted` failure: the key's
+    daily free-model quota is shared by every free model, so the rest are skipped. No model is
+    started once `deadline_s` seconds have passed since the first; each attempt gets the time that
+    is left as `ctx.budget_s`.
     """
     if not math.isfinite(deadline_s) or deadline_s <= 0:
         raise ValueError(f"deadline_s must be a finite number > 0, got {deadline_s!r}")
@@ -327,4 +355,85 @@ def run_with_fallback(models: Sequence[str], run_one: Callable[[AttemptContext],
         attempts.append(rec)
         log.warning("review model failed", extra={"model": model, "outcome": rec.outcome,
                                                    "error_class": rec.error_class, "latency_ms": latency})
+        if rec.outcome == "quota_exhausted":
+            log.warning("daily free-model quota exhausted; models not tried",
+                        extra={"skipped": len(models) - len(attempts)})
+            break
     return None, tuple(attempts)
+
+
+# ----------------------------------------------------------------------------- free-tier budget
+
+def limit_requests(llm: Any, agent_roles: Collection[str]) -> list[str]:
+    """Let `llm` send at most one request per agent in `agent_roles`, and nothing else.
+
+    CrewAI 1.15 can send more than one request per agent even with `max_iter=1`:
+    - an empty answer is asked again once (`utilities.agent_utils._call_llm_retrying_empty`);
+    - an answer that names a tool ("Action: ...") makes the executor run it and then force a final
+      answer with one more request (`AgentExecutor.ensure_force_final_answer` ->
+      `handle_max_iterations_exceeded`), sent without `from_agent`;
+    - structured-output and conversion requests (`_structured_final_answer`, the task converter),
+      which the review avoids by giving tasks no `output_pydantic`, are also sent without it.
+    Every one of these goes through `llm.call`, so the instance's `call` is wrapped: a request is
+    sent only for an agent in `agent_roles` that has sent none yet; anything else raises
+    RequestRefused before it reaches the provider (the attempt then fails as `invalid_output`).
+    `acall` is refused outright (the review runs synchronously). Returns the list of roles that
+    sent a request, in order.
+    """
+    roles, sent = frozenset(agent_roles), []
+    real_call = llm.call
+
+    def call(messages, tools=None, callbacks=None, available_functions=None, from_task=None, from_agent=None,
+             response_model=None, **kwargs):
+        role = getattr(from_agent, "role", None)
+        if role not in roles:
+            raise RequestRefused("CrewAI asked for a request outside an agent's single answer (a forced final "
+                                 "answer or a conversion): an answer was malformed")
+        if role in sent:
+            raise RequestRefused(f"{role} asked for a second request: its answer was empty or malformed")
+        sent.append(role)
+        return real_call(messages, tools=tools, callbacks=callbacks, available_functions=available_functions,
+                         from_task=from_task, from_agent=from_agent, response_model=response_model, **kwargs)
+
+    async def acall(*args, **kwargs):
+        raise RequestRefused("asynchronous requests are not used by the review")
+
+    # The LLM is a pydantic model: object.__setattr__ puts the wrappers in the instance's __dict__,
+    # which shadows the class methods for every caller.
+    object.__setattr__(llm, "call", call)
+    object.__setattr__(llm, "acall", acall)
+    return sent
+
+
+def free_model_quota(settings, *, http_get: Callable[..., Any] | None = None,
+                     timeout_s: float = QUOTA_TIMEOUT_S) -> int | None:
+    """Free-model requests the OpenRouter key has left today, or None if that cannot be read.
+
+    `GET {OPENROUTER_BASE_URL}/key` with the key as Bearer token, field
+    `data.free_model_daily_requests.remaining`. Any failure (no key, HTTP error, timeout, bad JSON,
+    missing or non-integer field) gives None, and the caller then runs the review anyway.
+    `http_get(url, headers=..., timeout=...)` defaults to `httpx.get` (tests inject one). Only the
+    error class and HTTP status are logged, never the key or the response text.
+    """
+    key = settings.openrouter_api_key
+    if not key:
+        return None
+    url = settings.openrouter_base_url.rstrip("/") + "/key"
+    if http_get is None:
+        import httpx
+        http_get = httpx.get
+    with redacting_logs(make_redactor([key])):
+        try:
+            resp = http_get(url, headers={"Authorization": f"Bearer {key}"}, timeout=timeout_s)
+            status = getattr(resp, "status_code", None)
+            if status != 200:
+                log.warning("free-model quota check failed", extra={"status": status})
+                return None
+            remaining = resp.json()["data"]["free_model_daily_requests"]["remaining"]
+        except Exception as e:  # noqa: BLE001 - the check is advisory: any failure means "unknown"
+            log.warning("free-model quota check failed", extra={"error_class": type(e).__name__})
+            return None
+    if isinstance(remaining, bool) or not isinstance(remaining, int):
+        log.warning("free-model quota check failed", extra={"error_class": "UnexpectedValue"})
+        return None
+    return remaining

@@ -10,11 +10,17 @@ per step (Phase 4 persists them as job_steps and llm_attempts; nothing here writ
 - With OPENROUTER_MODELS empty, the same steps run in a plain loop and crewai is never imported:
   ai_review is "disabled".
 
-The review is three agents (Filter, Harmonization, Validation reviewer), each with one read-only
-tool returning a JSON summary built from the stage summaries, gates and soft flags only (never
-detection or staged rows), capped at REVIEW_SUMMARY_MAX_CHARS. One fallback attempt is the whole
-crew run with one model. Its verdict must pass `validate_verdict` (parses, flags only affected
-keys, I8: no number the tools did not return), and `decide()` lets it only downgrade.
+The review is three agents (Filter, Harmonization, Validation reviewer). Each one's task prompt
+carries its JSON summary, built from the stage summaries, gates and soft flags only (never
+detection or staged rows) and capped at REVIEW_SUMMARY_MAX_CHARS. Agents have no tools and answer
+once (spec §7 free-tier budget), so one fallback attempt, the whole crew run with one model, sends
+at most REQUESTS_PER_ATTEMPT requests; `worker.llm.limit_requests` enforces that. The Validation
+reviewer's raw answer must pass `validate_verdict` (parses, flags only affected keys, I8: no number
+absent from the summaries in the prompts), and `decide()` lets it only downgrade.
+
+Before any model is tried, the key's remaining free-model requests are read
+(OPENROUTER_QUOTA_CHECK). With fewer than REQUESTS_PER_ATTEMPT left, no model is built: the review
+is "unavailable" with reason "daily_quota", and the gates decide (D3).
 """
 
 from __future__ import annotations
@@ -37,13 +43,13 @@ from processing.common import normalize_keys
 from processing.mask import StaticMask
 from processing.params import DEFAULT_PARAMS, ProcessingParams
 from processing.pipeline import STAGE_ORDER, ProcessingResult, ProcessingRun
-from worker.llm import (AttemptContext, InvalidOutput, build_llm, crewai_run_scope, import_crewai,
-                        run_with_fallback, token_usage, utcnow)
+from worker.llm import (AttemptContext, InvalidOutput, build_llm, crewai_run_scope, free_model_quota,
+                        import_crewai, limit_requests, run_with_fallback, token_usage, utcnow)
 
 STEPS = STAGE_ORDER + ("review", "decide")
 AI_REVIEW = ("completed", "unavailable", "disabled")
 TRUNCATED = " ...[truncated to REVIEW_SUMMARY_MAX_CHARS]"  # no digits: adds nothing to the I8 set
-MAX_ITER = 3  # per agent: one tool call, one answer, one spare
+MAX_ITER = 1  # per agent: the answer, nothing else (spec §7 free-tier budget)
 # Hashes (calibration fingerprint, mask digests and versions) are opaque to a reviewer, and their
 # digits would only widen the I8 allowed set: dropped, or replaced by "<hash>" inside strings.
 _HASH_FIELDS = ("fingerprint", "content_sha256", "file_sha256")
@@ -52,6 +58,7 @@ _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 Key = tuple[int, int, int, int]  # (cy, cx, year, month)
 LLMFactory = Callable[..., Any]  # (model, settings, *, timeout_s) -> crewai BaseLLM, like llm.build_llm
+QuotaCheck = Callable[[Any], "int | None"]  # (settings) -> free-model requests left today, like llm.free_model_quota
 
 
 class Verdict(BaseModel):
@@ -91,8 +98,8 @@ def validate_verdict(verdict_or_raw: Verdict | Mapping | str, affected_keys, too
     """The verdict as a Verdict, or InvalidOutput if it does not parse, flags a key outside
     `affected_keys`, or has a reason with a number not in `tool_results` (I8, check_numbers).
 
-    `tool_results`: exactly what the agents were shown. A raw string may be wrapped in a ```json
-    fence, as models often do.
+    `tool_results`: exactly the summaries put into the agents' prompts (spec §7: "tool results"
+    in I8 means these). A raw string may be wrapped in a ```json fence, as models often do.
     """
     try:
         if isinstance(verdict_or_raw, Verdict):
@@ -100,7 +107,7 @@ def validate_verdict(verdict_or_raw: Verdict | Mapping | str, affected_keys, too
         elif isinstance(verdict_or_raw, str):
             raw = verdict_or_raw.strip()
             m = _FENCE.match(raw)
-            verdict = Verdict.model_validate_json(m.group(1) if m else raw)
+            verdict = _embedded_verdict(raw) or Verdict.model_validate_json(m.group(1) if m else raw)
         else:
             verdict = Verdict.model_validate(verdict_or_raw)
     except ValidationError as e:
@@ -116,6 +123,23 @@ def validate_verdict(verdict_or_raw: Verdict | Mapping | str, affected_keys, too
         if not ok:
             raise InvalidOutput(f"reason has numbers not in the tool results (I8): {bad[:5]}")
     return verdict
+
+
+def _embedded_verdict(raw: str) -> Verdict | None:
+    """The first JSON object in `raw` that is a valid Verdict, or None.
+
+    Free models often wrap the JSON in prose ("Here is my verdict: {...}"). Without a CrewAI
+    conversion call (free-tier budget, spec §7), rejecting that would waste a whole attempt.
+    The object must still validate completely, and I8 and the key checks still apply to it.
+    """
+    decoder = json.JSONDecoder()
+    for start in (i for i, ch in enumerate(raw) if ch == "{"):
+        try:
+            obj, _ = decoder.raw_decode(raw, start)
+            return Verdict.model_validate(obj)
+        except (ValueError, ValidationError):
+            continue
+    return None
 
 
 def _key_set(affected_keys) -> set[Key]:
@@ -138,7 +162,7 @@ def _without_hashes(obj: Any) -> Any:
 
 
 def review_payloads(result: ProcessingResult, affected_keys, max_chars: int) -> dict[str, str]:
-    """The JSON text each reviewer's tool returns, from stage summaries, gates and soft flags only."""
+    """The JSON text put into each reviewer's task prompt, from stage summaries, gates and soft flags only."""
     s = result.summary()
     stages, inputs = s["stages"], s["stages"]["inputs"]
     payloads = {
@@ -155,71 +179,62 @@ def review_payloads(result: ProcessingResult, affected_keys, max_chars: int) -> 
 
 # ----------------------------------------------------------------------------- the crew
 
+# The wording contains no digits, so the only numbers a prompt adds are the payload's (I8).
 _REVIEWERS = {
-    # name: (role, goal, tool description, task description)
+    # name: (role, goal, task description; the payload follows it)
     "filter": ("Filter reviewer", "Check that the filter and aggregation results of a detection run are plausible.",
-               "Filter and aggregation summary of this processing run (JSON).",
-               "Call the filter_summary tool, then review it: are the drops per rule and the kept and aggregated "
-               "counts per sensor family consistent and plausible? Answer with up to three short notes."),
+               "Review the filter and aggregation summary of this processing run below: are the drops per rule "
+               "and the kept and aggregated counts per sensor family consistent and plausible? Answer with up to "
+               "three short notes."),
     "harmonization": ("Harmonization reviewer",
                       "Check that the harmonization, completeness and drift results are plausible.",
-                      "Calibration, harmonization, completeness and drift summary of this run (JSON).",
-                      "Call the harmonization_summary tool, then review it: reference sensors, quality flags, "
-                      "partial months and drift. Answer with up to three short notes."),
+                      "Review the calibration, harmonization, completeness and drift summary of this run below: "
+                      "reference sensors, quality flags, partial months and drift. Answer with up to three short "
+                      "notes."),
     "validation": ("Validation reviewer", "Decide whether this run's results may be published.",
-                   "Hard gate results, soft flags and the affected (cy, cx, year, month) keys of this run (JSON).",
-                   "Call the validation_summary tool, then decide using it and the other reviewers' notes. "
-                   "The hard gates are enforced in code; your decision can only keep or lower an approval. "
-                   "Use approve, hold (keep the results unpublished for a human) or reject. Give short reasons, "
-                   "and in flagged_keys only keys listed under affected_keys."),
+                   "Decide, using the hard gate results, soft flags and affected (cy, cx, year, month) keys below "
+                   "and the other reviewers' notes. The hard gates are enforced in code; your decision can only "
+                   "keep or lower an approval. Use approve, hold (keep the results unpublished for a human) or "
+                   "reject. Give short reasons, and in flagged_keys only keys listed under affected_keys."),
 }
-_COMMON_RULES = (" Quote numbers only exactly as the tool returned them and never compute new ones. "
-                 "A detection is a satellite thermal hotspot, not one wildfire.")
+_COMMON_RULES = (" Quote numbers only exactly as the summary gives them and never compute new ones. "
+                 "A detection is a satellite thermal hotspot, not one wildfire. Answer at once, in one reply.")
+_PAYLOAD_HEADER = "\n\nSummary (JSON):\n"
+_VERDICT_FORMAT = ('Only a JSON object, no other text: {"decision": "approve" | "hold" | "reject", '
+                   '"reasons": [short strings], "flagged_keys": [[cy, cx, year, month], ...]}')
+REVIEWER_ROLES = tuple(role for role, _, _ in _REVIEWERS.values())
+REQUESTS_PER_ATTEMPT = len(_REVIEWERS)  # one answer per agent
 
 
-@lru_cache(maxsize=1)
-def _summary_tool_class():
-    import_crewai()
-    from crewai.tools import BaseTool
-    from pydantic import PrivateAttr
-
-    class SummaryTool(BaseTool):
-        """Read-only: returns a fixed JSON summary and records that it was shown."""
-        payload: str
-        _shown: list = PrivateAttr(default_factory=list)
-
-        def _run(self, **_: Any) -> str:
-            self._shown.append(self.payload)
-            return self.payload
-
-    return SummaryTool
+def task_descriptions(payloads: Mapping[str, str]) -> dict[str, str]:
+    """Each reviewer's whole task prompt text: its wording, the common rules, then its payload."""
+    return {name: text + _COMMON_RULES + _PAYLOAD_HEADER + payloads[name]
+            for name, (_, _, text) in _REVIEWERS.items()}
 
 
-def build_crew(llm, payloads: Mapping[str, str], shown: list[str]):
-    """The three-agent sequential crew over `payloads`; tool outputs are appended to `shown`.
+def build_crew(llm, payloads: Mapping[str, str]):
+    """The three-agent sequential crew over `payloads`, each put directly into its task prompt.
 
-    Memory, knowledge, planning, embeddings, delegation and caching are off (reasoning and code
-    execution stay at their off defaults), and every agent uses `llm` explicitly (no default
-    provider). Context-window summarisation is off too: it would make extra LLM calls.
+    Agents have no tools and `max_iter = 1`; tasks have no `output_pydantic`, so CrewAI makes no
+    conversion request. Memory, knowledge, planning, embeddings, delegation and caching are off
+    (reasoning and code execution stay at their off defaults), and every agent uses `llm`
+    explicitly (no default provider). Context-window summarisation is off too: it would make
+    extra LLM calls. Payloads are never interpolated: kickoff() gets no inputs.
     """
     import_crewai()
     from crewai import Agent, Crew, Process, Task
 
-    tool_cls = _summary_tool_class()
+    descriptions = task_descriptions(payloads)
     agents, tasks = [], []
-    for name, (role, goal, tool_text, task_text) in _REVIEWERS.items():
-        tool = tool_cls(name=f"{name}_summary", description=tool_text, payload=payloads[name])
-        tool._shown = shown
+    for name, (role, goal, _) in _REVIEWERS.items():
         agent = Agent(role=role, goal=goal, backstory="A careful reviewer of EmberGuard's automated FIRMS processing.",
-                      llm=llm, tools=[tool], max_iter=MAX_ITER, max_retry_limit=0, allow_delegation=False,
+                      llm=llm, tools=[], max_iter=MAX_ITER, max_retry_limit=0, allow_delegation=False,
                       verbose=False, cache=False, memory=None, knowledge_sources=None, embedder=None,
                       planning=False, inject_date=False, respect_context_window=False,
                       use_better_compaction=False)
         is_verdict = name == "validation"
-        tasks.append(Task(description=task_text + _COMMON_RULES, agent=agent, context=list(tasks) if is_verdict else [],
-                          expected_output=("A verdict with decision, reasons and flagged_keys." if is_verdict
-                                           else "Up to three short notes."),
-                          output_pydantic=Verdict if is_verdict else None))
+        tasks.append(Task(description=descriptions[name], agent=agent, context=list(tasks) if is_verdict else [],
+                          expected_output=_VERDICT_FORMAT if is_verdict else "Up to three short notes."))
         agents.append(agent)
     return Crew(agents=agents, tasks=tasks, process=Process.sequential, memory=False, planning=False,
                 cache=False, verbose=False, tracing=False, share_crew=False, embedder=None)
@@ -227,13 +242,16 @@ def build_crew(llm, payloads: Mapping[str, str], shown: list[str]):
 
 def review_attempt(ctx: AttemptContext, *, settings, payloads: Mapping[str, str], affected_keys,
                    llm_factory: LLMFactory) -> Verdict:
-    """One model's whole crew run; raises on any failure (run_with_fallback then tries the next)."""
+    """One model's whole crew run; raises on any failure (run_with_fallback then tries the next).
+
+    At most one request per agent (limit_requests). The verdict is the Validation reviewer's raw
+    final answer; its numbers are checked against exactly the payloads put into the prompts.
+    """
     llm = llm_factory(ctx.model, settings, timeout_s=ctx.budget_s)
-    shown: list[str] = []
+    limit_requests(llm, REVIEWER_ROLES)
     try:
-        out = build_crew(llm, payloads, shown).kickoff()
-        final = out.tasks_output[-1]
-        return validate_verdict(final.pydantic if final.pydantic is not None else final.raw, affected_keys, shown)
+        out = build_crew(llm, payloads).kickoff()
+        return validate_verdict(out.tasks_output[-1].raw, affected_keys, list(payloads.values()))
     finally:
         ctx.usage = token_usage(llm)
 
@@ -267,6 +285,7 @@ class _Job:
     llm_factory: LLMFactory
     clock: Callable[[], float]
     now: Callable[[], datetime]
+    quota_check: QuotaCheck = free_model_quota
     steps: list[dict] = field(default_factory=list)
     result: ProcessingResult | None = None
     verdict: Verdict | None = None
@@ -295,6 +314,13 @@ class _Job:
         if not models:
             self.ai_review = "disabled"
             return {"ai_review": "disabled", "models": 0}
+        remaining = self.quota_check(self.settings) if self.settings.openrouter_quota_check else None
+        if remaining is not None and remaining < REQUESTS_PER_ATTEMPT:
+            # Not enough left for one attempt: no model is built, the gates decide (D3).
+            self.ai_review = "unavailable"
+            return {"ai_review": "unavailable", "models": len(models), "attempts": 0, "model": None,
+                    "verdict": None, "reason": "daily_quota", "quota_remaining": remaining,
+                    "requests_per_attempt": REQUESTS_PER_ATTEMPT}
         payloads = review_payloads(self.result, self.affected_keys, self.settings.review_summary_max_chars)
         verdict, attempts = run_with_fallback(
             models, lambda ctx: review_attempt(ctx, settings=self.settings, payloads=payloads,
@@ -303,10 +329,13 @@ class _Job:
             clock=self.clock, now=self.now)
         self.verdict, self.attempts = verdict, tuple(a.to_dict() for a in attempts)
         self.ai_review = "completed" if verdict is not None else "unavailable"
-        return {"ai_review": self.ai_review, "models": len(models), "attempts": len(attempts),
-                "model": attempts[-1].model if verdict is not None else None,
-                "verdict": verdict.model_dump(mode="json") if verdict is not None else None,
-                "payload_chars": {k: len(v) for k, v in payloads.items()}}
+        summary = {"ai_review": self.ai_review, "models": len(models), "attempts": len(attempts),
+                   "model": attempts[-1].model if verdict is not None else None,
+                   "verdict": verdict.model_dump(mode="json") if verdict is not None else None,
+                   "payload_chars": {k: len(v) for k, v in payloads.items()}, "quota_remaining": remaining}
+        if verdict is None and attempts and attempts[-1].outcome == "quota_exhausted":
+            summary["reason"] = "daily_quota"
+        return summary
 
     def _decide(self) -> dict:
         self.decision = decide(self.result.passed, self.verdict, self.ai_review)
@@ -345,19 +374,22 @@ def run_processing(detections: pd.DataFrame, affected_keys, calibration: Calibra
                    mask: StaticMask | None, boundary: Boundary | None, coverage,
                    availability: Mapping[str, object], now, params: ProcessingParams = DEFAULT_PARAMS,
                    recent_drop_shares: Mapping[str, float] | None = None, settings,
-                   llm_factory: LLMFactory | None = None, clock: Callable[[], float] = time.monotonic,
+                   llm_factory: LLMFactory | None = None, quota_check: QuotaCheck | None = None,
+                   clock: Callable[[], float] = time.monotonic,
                    utcnow: Callable[[], datetime] = utcnow) -> RunOutcome:
     """Process, review and decide one run. Arguments up to `recent_drop_shares` are `process()`'s.
 
     settings: settings.Settings (OPENROUTER_*, REVIEW_*). llm_factory: builds each attempt's LLM,
-    default worker.llm.build_llm (tests inject a stub). clock / utcnow: the deadline clock and the
-    timestamps of steps and attempts. Raises ProcessingFailed if a step raises.
+    default worker.llm.build_llm (tests inject a stub). quota_check: the free-model requests left
+    today, default worker.llm.free_model_quota (only called with OPENROUTER_QUOTA_CHECK on and a
+    model list). clock / utcnow: the deadline clock and the timestamps of steps and attempts.
+    Raises ProcessingFailed if a step raises.
     """
     run = ProcessingRun.start(detections, affected_keys, calibration, mask=mask, boundary=boundary,
                               coverage=coverage, availability=availability, now=now, params=params,
                               recent_drop_shares=recent_drop_shares)
     job = _Job(run=run, affected_keys=affected_keys, settings=settings, llm_factory=llm_factory or build_llm,
-               clock=clock, now=utcnow)
+               quota_check=quota_check or free_model_quota, clock=clock, now=utcnow)
     if not settings.openrouter_models:
         for name in STEPS:  # review disabled: crewai is not imported (spec §7)
             job.step(name)
