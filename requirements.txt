@@ -4,3 +4,6 @@ numpy
 pyarrow
 fastapi
 uvicorn
+httpx           # api/weather.py: Open-Meteo calls (without it the /weather router is skipped)
+anthropic>=2.8  # api/passport.py: optional AI wording; 2.8 is the version verified to accept output_config
+tzdata          # zoneinfo fallback for api/weather.py if the host has no system time zones
