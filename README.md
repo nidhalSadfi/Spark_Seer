@@ -16,8 +16,8 @@ python pipeline/ingest.py data/raw data/cells.parquet 34   # 34 = keep north of 
 python pipeline/calibrate.py data/cells.parquet data/harmonized.parquet
 # 3. Serve the API (data path: env EMBER_DATA, default data/harmonized.parquet)
 uvicorn api.main:app --reload --port 8000
-# GET http://localhost:8000/calendar?area=bizerte&start=2003&end=2025
-# 4. Offline demo fallback: writes web/backup/<area_id>.json + validation.json from the real data
+# open http://localhost:8000/ for the demo page, or GET /calendar?area=bizerte&start=2003&end=2025
+# 4. Offline demo fallback: writes web/backup/<area_id>.json, areas.json, validation.json
 python scripts/export_backups.py
 ```
 
@@ -41,6 +41,21 @@ appears. Its validation report says `"synthetic": true` and lists the planted an
 `/validation` and `/calendar` `meta.validation` show that the data is fake. `export_backups.py`
 refuses to write it into `web/backup/`; pass another folder to test the offline mode. **Never
 commit this data or show it as results.**
+
+## Demo page
+
+`web/demo/` is a plain HTML/JS page (no build step, no CDN) that exercises every endpoint and
+explains the method. The API serves it: `http://localhost:8000/` (or the Render URL) redirects to
+`/web/demo/`. It shows the burning calendar (hover a cell, click it for the Evidence Passport),
+yearly MODIS / VIIRS / harmonized totals across the 2012 switch, the typical year, the validation
+errors, the weather context, table views, and an **API log** with the raw JSON of every request.
+
+- Link parameters: `?area=bizerte&month=2008-07&theme=dark`, and `?api=https://<service>.onrender.com`
+  when the page is served from elsewhere.
+- Offline: if the API is unreachable, the page reads `web/backup/*.json` and says so. To try it
+  without the API: `python -m http.server -d web 8080`, then open `http://localhost:8080/demo/`.
+- It is a test and explanation page. The team's React app lives on the `frontend` branch and can
+  reuse its `fetch` calls (`web/demo/app.js`).
 
 ## Deploy (Render, free web service)
 

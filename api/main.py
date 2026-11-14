@@ -5,16 +5,22 @@ Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLa
       GET /calendar?area=bizerte                     (ids from GET /areas)
 """
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from api import core
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI(title="EmberLedger")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+# Static files: the demo page (web/demo/) and the offline backups (web/backup/).
+app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
 # Teammate routers (api/passport.py, api/weather.py): optional, so the app starts without them.
 try:
@@ -37,7 +43,7 @@ def missing_data(request, exc):
 
 @app.get("/", include_in_schema=False)
 def root():
-    return RedirectResponse("/docs")  # a browser on the base URL gets the API docs, not a 404
+    return RedirectResponse("/web/demo/")  # a browser on the base URL gets the demo (API docs: /docs)
 
 
 @app.get("/health")

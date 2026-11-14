@@ -13,3 +13,4 @@ def test_backups_match_live_api(tmp_path, monkeypatch):
         live = c.get(f"/calendar?area={area['id']}&start=2001&end=2025").content
         assert (tmp_path / "backup" / f"{area['id']}.json").read_bytes() == live
     assert (tmp_path / "backup" / "validation.json").read_bytes() == c.get("/validation").content
+    assert (tmp_path / "backup" / "areas.json").read_bytes() == c.get("/areas").content  # offline demo needs it

@@ -120,7 +120,11 @@ def test_optional_fields_passed_through_when_present(tmp_path, monkeypatch):
         assert isinstance(r["MODIS_days"], int)
 
 
-def test_root_redirects_to_docs(client):
+def test_root_redirects_to_demo_page(client):
     r = client.get("/", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"] == "/docs"
-    assert client.get("/").status_code == 200  # /docs itself
+    assert r.status_code == 307 and r.headers["location"] == "/web/demo/"
+    page = client.get("/")
+    assert page.status_code == 200 and "EmberLedger demo" in page.text
+    for asset in ["app.js", "style.css"]:
+        assert client.get(f"/web/demo/{asset}").status_code == 200, asset
+    assert client.get("/docs").status_code == 200
