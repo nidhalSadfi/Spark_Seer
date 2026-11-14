@@ -47,13 +47,14 @@ commit this data or show it as results.**
 1. Commit the files the API serves: `data/harmonized.parquet`, `data/harmonized_validation.json`
    (small) and `data/areas.json`. Never commit `data/raw/`: it is gitignored because the raw CSVs
    are ~127 MB and one file is over GitHub's 100 MB limit.
-2. Merge to `main` and push. `render.yaml` deploys from `main`.
+2. Merge to `main` and push. `render.yaml` (at the repo root, not in `backend/`) deploys from
+   `main`.
 3. Render dashboard: **New > Blueprint**, pick this GitHub repo, apply. `render.yaml` sets the free
-   plan, `pip install -r requirements.txt`, the start command
+   plan, root directory `backend`, `pip install -r requirements.txt`, the start command
    `uvicorn api.main:app --host 0.0.0.0 --port $PORT`, the health check `/health` and
    `PYTHON_VERSION=3.11.9`.
-   Without Blueprints: **New > Web Service**, runtime Python, same build and start commands,
-   env var `PYTHON_VERSION=3.11.9`, health check path `/health`.
+   Without Blueprints: **New > Web Service**, runtime Python, root directory `backend`, same build
+   and start commands, env var `PYTHON_VERSION=3.11.9`, health check path `/health`.
 4. Open `https://<service>.onrender.com/health`: expect `"status": "ok"` and the real row count.
    A 503 there means the data files were not committed, and Render marks the deploy as failed.
 
