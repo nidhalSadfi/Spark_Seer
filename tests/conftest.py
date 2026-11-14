@@ -32,8 +32,9 @@ def make_dataset(folder, optional_cols=False, series=None) -> str:
                                  harmonized=modis * k if year < 2012 else viirs,
                                  source="MODIS*k" if year < 2012 else "VIIRS"))
     df = pd.DataFrame(rows)
-    if optional_cols:
-        df["low"], df["high"] = df.harmonized * 0.8, df.harmonized * 1.2
+    if optional_cols:  # bounds only where the value is MODIS * k (pre-2012), NaN afterwards
+        pre = df.year < 2012
+        df["low"], df["high"] = (df.harmonized * 0.8).where(pre), (df.harmonized * 1.2).where(pre)
         df["MODIS_days"], df["VIIRS_days"] = np.minimum(df.MODIS, 28), np.minimum(df.VIIRS, 28)
     path = folder / "harmonized.parquet"
     df.to_parquet(path, index=False)

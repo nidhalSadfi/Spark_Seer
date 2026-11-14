@@ -16,6 +16,7 @@ CELL_DEG = 0.5
 MIN_SUPPORT = 30  # MODIS detections behind a ratio before we call it "reliable"
 MIN_COUNT = 10    # months below this (and normally below it) are never flagged as anomalies
 Z_FLAG = 3.0      # robust z-score threshold; 2 flags too many months on noisy counts
+OPTIONAL = ["low", "high", "MODIS_days", "VIIRS_days"]  # passed through only if the parquet has them
 
 
 def data_path() -> str:
@@ -74,9 +75,12 @@ def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int, end: 
     if sel.empty:
         return {"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}
 
+    opt = [c for c in OPTIONAL if c in sel.columns]
     m = sel.groupby(["year", "month"]).agg(
         modis_raw=("MODIS", "sum"), viirs_raw=("VIIRS", "sum"),
-        harmonized=("harmonized", "sum")).reset_index()
+        harmonized=("harmonized", "sum"),
+        # Optional columns are summed over cells too, but stay null if any cell lacks the value.
+        **{c: (c, lambda s: s.sum(skipna=False)) for c in opt}).reset_index()
     # Support = training MODIS detections behind this area's ratio, per calendar month.
     support = sel.drop_duplicates(["cy", "cx", "month"]).groupby("month").support.sum()
 
@@ -97,8 +101,11 @@ def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int, end: 
     clim = m.groupby("month").harmonized.median()
     critical = [int(mo) for mo in clim.index if clim[mo] >= clim.quantile(0.75) and clim[mo] > 0]
 
+    out = m.round(1)
+    if opt:
+        out[opt] = out[opt].astype(object).where(out[opt].notna(), None)  # NaN is not valid JSON
     return {
-        "months": m.round(1).to_dict(orient="records"),
+        "months": out.to_dict(orient="records"),
         "meta": {"cells": int(sel[["cy", "cx"]].drop_duplicates().shape[0]),
                  "critical_months": critical, "validation": get_validation()},
     }
