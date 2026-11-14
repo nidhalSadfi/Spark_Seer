@@ -11,9 +11,13 @@ let a CrewAI flow orchestrate filtering, harmonization and validation over deter
 tools, and publish to PostgreSQL only what passes validation. FastAPI serves the approved data;
 the React Processing Center shows what the pipeline actually did.
 
-Region: Tunisia + Algeria north of 34°N (the existing EmberLedger scope). Query bbox is
-configurable; the default is the union of the areas in `backend/data/areas.json` padded to whole
-0.5° cells.
+Region: Tunisia + Algeria north of 34°N (the existing EmberLedger scope). The query bbox is
+configurable (`FIRMS_BBOX`). Its default, `-2.5,34.0,11.5,38.0`, covers that whole region padded to
+0.5° cells: the Algeria–Morocco border lies near 1.8°W and the Kerkennah islands reach about
+11.4°E. Polling only the demo areas would leave new months of every other historical cell
+unfetched, and the API would show them as zeros (violates I7). The box still fits one 60° FIRMS
+tile, so the cost is unchanged. It includes a strip of Morocco and some sea; the country clip in §5
+removes them.
 
 ## 2. Decisions (approved 2026-11-14)
 
@@ -88,6 +92,11 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
   nominal, high}; SP rows: `type == 0`. NRT rows have no `type`; drop any NRT detection that
   falls inside the static-source mask (below). Implement this in ONE shared function and use it
   everywhere. The two existing ingest scripts disagree on NRT rows; neither behaviour is kept.
+- **Country clip:** keep only detections inside the Tunisia or Algeria land boundary. The historical
+  series was built from FIRMS per-country files, so bbox data must be clipped the same way to stay
+  comparable. Use a committed, public-domain boundary file (Natural Earth admin-0, 1:10m) with its
+  source and version recorded. Small differences from FIRMS's own country assignment near borders
+  are expected; report how many detections the clip removes per run.
 - **Static-source mask:** derived from historical SP rows with `type` in {1, 2, 3}. Mask cells are
   0.01° squares with at least N such detections (N configurable, default 3). Versioned like the
   calibration. NRT rows are replaced by SP rows in `monthly_reconcile`, which restores real `type`.
