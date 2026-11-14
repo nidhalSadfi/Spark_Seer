@@ -14,7 +14,7 @@ docker-compose.yml    local services (Postgres for now)
 render.yaml           Render blueprint for the API (rootDir: backend)
 ```
 
-The processing architecture spec will live at `docs/processing/ARCHITECTURE.md`.
+The processing architecture spec is `docs/processing/ARCHITECTURE.md`.
 
 ## Backend
 
