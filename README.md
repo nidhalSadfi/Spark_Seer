@@ -50,6 +50,21 @@ detections; see `docs/processing/ARCHITECTURE.md`. Only the `db` service exists 
 `worker` services arrive in later phases. `docker/initdb/` creates the `emberguard_test` database
 when the db volume is first initialised.
 
+## Processing science
+
+`backend/processing/` holds the deterministic stages of spec §5-§6 (shared filter, country clip,
+static-source mask, 0.5° counts, harmonization with a frozen calibration, completeness, gates G1-G4,
+drift) as pure Python, tested on synthetic data only. Two CLIs build the real artefacts once the
+FIRMS yearly country CSVs for Tunisia and Algeria exist (run from `backend/`):
+
+```bash
+python -m processing.build_mask data/raw data/static_mask.json          # then STATIC_MASK_FILE=...
+python -m processing.fit_inter_viirs data/raw data/inter_viirs_fit.json  # proposed r (S-NPP / NOAA-20)
+```
+
+The country clip needs a boundary GeoJSON (`COUNTRY_BOUNDARY_FILE`); none is committed yet. While
+the mask or boundary file is unset, the run reports that rule as disabled.
+
 ## Where the code came from
 
 `backend/` and `frontend/` are subtree merges of the teammate branches, so their history is
