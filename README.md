@@ -28,6 +28,20 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+Fake data, to run the API and front end before the real data exists:
+
+```bash
+python scripts/make_fake_data.py              # writes data/fake/ (gitignored); --optional adds low/high/*_days
+EMBER_DATA=data/fake/harmonized.parquet uvicorn api.main:app --reload --port 8000
+```
+
+The script generates fake monthly counts for the four areas (2001-2025, summer peak, sparse
+winters) and runs the real `pipeline/calibrate.py` on them. It plants four anomalies so every flag
+appears. Its validation report says `"synthetic": true` and lists the planted anomalies, so
+`/validation` and `/calendar` `meta.validation` show that the data is fake. `export_backups.py`
+refuses to write it into `web/backup/`; pass another folder to test the offline mode. **Never
+commit this data or show it as results.**
+
 ## Deploy (Render, free web service)
 
 1. Commit the files the API serves: `data/harmonized.parquet`, `data/harmonized_validation.json`
