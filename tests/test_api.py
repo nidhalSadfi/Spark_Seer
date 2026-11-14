@@ -1,4 +1,7 @@
-from conftest import YEARS
+from fastapi.testclient import TestClient
+
+from api.main import app
+from conftest import VALIDATION, YEARS, make_dataset
 
 REQUIRED = {"year", "month", "modis_raw", "viirs_raw", "harmonized", "support", "z", "flag"}
 FLAGS = {"high", "low", "normal", "low_confidence"}
@@ -44,6 +47,19 @@ def test_calendar_by_area_matches_bbox(client):
 def test_calendar_400s(client):
     for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d"]:
         assert client.get("/calendar" + query).status_code == 400, query
+
+
+def test_validation_without_series(client):
+    assert client.get("/validation").json() == VALIDATION
+
+
+def test_validation_series_passthrough(tmp_path, monkeypatch):
+    series = [{"year": 2020, "month": 8, "observed": 120, "predicted": 110}]
+    monkeypatch.setenv("EMBER_DATA", make_dataset(tmp_path, series=series))
+    c = TestClient(app)
+    assert c.get("/validation").json() == dict(VALIDATION, series=series)
+    # /calendar keeps its compact meta.validation
+    assert c.get(f"/calendar?bbox={BIZERTE}").json()["meta"]["validation"] == VALIDATION
 
 
 def test_calendar_empty_area(client):
