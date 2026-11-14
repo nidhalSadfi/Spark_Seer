@@ -105,3 +105,17 @@ def test_cors_allows_get_and_post_from_any_origin(client):
     r = client.options("/calendar", headers={"Origin": "https://example.org",
                                              "Access-Control-Request-Method": "DELETE"})
     assert r.status_code == 400
+
+
+def test_optional_fields_passed_through_when_present(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBER_DATA", make_dataset(tmp_path, optional_cols=True))
+    body = TestClient(app).get(f"/calendar?bbox={BIZERTE}&start=2008&end=2015").json()
+    check_calendar(body, 2008, 2015)
+    busy = [r for r in body["months"] if r["modis_raw"] or r["viirs_raw"]]
+    assert all({"low", "high", "MODIS_days", "VIIRS_days"} <= r.keys() for r in body["months"])
+    for r in busy:
+        if r["year"] < 2012:
+            assert abs(r["low"] - 0.8 * r["harmonized"]) < 0.2 and r["high"] >= r["harmonized"]
+        else:
+            assert r["low"] is None and r["high"] is None  # missing in the data: null, never 0
+        assert isinstance(r["MODIS_days"], int)
