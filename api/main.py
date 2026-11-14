@@ -8,7 +8,7 @@ import logging
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from api import core
 
@@ -33,6 +33,11 @@ except ImportError as e:
 def missing_data(request, exc):
     # open() sets exc.filename; pyarrow (read_parquet) puts the path in the message instead.
     return JSONResponse(status_code=503, content={"detail": f"data file not found: {exc.filename or exc}"})
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/docs")  # a browser on the base URL gets the API docs, not a 404
 
 
 @app.get("/health")

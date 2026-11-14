@@ -120,3 +120,9 @@ def test_optional_fields_passed_through_when_present(tmp_path, monkeypatch):
         else:
             assert r["low"] is None and r["high"] is None  # missing in the data: null, never 0
         assert isinstance(r["MODIS_days"], int)
+
+
+def test_root_redirects_to_docs(client):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/docs"
+    assert client.get("/").status_code == 200  # /docs itself
