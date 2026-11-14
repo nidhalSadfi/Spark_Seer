@@ -113,15 +113,25 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
     days after it; the record notes the mix.
 - **Inter-VIIRS factor `r`:** fitted on the 2018-04 → S-NPP-end overlap with the same shrinkage
   approach as `calibrate.fit` (per calendar month, shrunk toward the regional value) and
-  validated on held-out years, reporting % error like `calibrate.validate`. Reference: in the
-  Australia exploration NOAA-20/S-NPP has a median of 0.98 (IQR 0.97–0.99). A regional result far
-  from that must be explained before approval.
-- **Partial months:** a month is partial until it has ended (UTC) and every contributing source's
-  availability covers its last day. Partial months get `is_partial = true` and flag `partial`. No
-  z-score is computed for them, because comparing an incomplete month with full months creates
-  false "low" anomalies.
-- **Anomalies:** unchanged from `api/core.calendar_for_bbox`: robust z against the same calendar
-  month in other years, |z| ≥ 3, MIN_COUNT 10, `low_confidence` for pre-2012 support < 30.
+  validated on held-out years, reporting % error like `calibrate.validate`. Default split: train on
+  full years 2019–2023, test on 2024–2025 (configurable). Months containing a known outage day of
+  either sensor are excluded from fit and test, because a dark satellite looks like "no fires". Known
+  outages live in a committed file with their source (initially the satellite-level gaps from the
+  Australia exploration: S-NPP 2022-07-27..08-10, 2024-05-30..06-03, 2024-07-10..07-15,
+  2024-07-25..07-28; NOAA-20 2023-07-19..07-22). Reference: in the Australia exploration
+  NOAA-20/S-NPP has a median of 0.98 (IQR 0.97–0.99), so r ≈ 1.02. A regional result far from that
+  must be explained before approval.
+- **Complete vs partial months:** a cell-month is complete only if (a) the month has ended (UTC)
+  and (b) for every source that contributes to it, stored fetches (`firms_fetches` windows, NRT or
+  SP) cover every day of the month and that source's availability `max_date` is on or after the
+  month's last day. Otherwise it is partial: `is_partial = true`, flag `partial`. This also covers
+  the first poll, whose 30-day backfill starts mid-month: that month is not complete from NRT
+  alone, and only becomes complete once SP data fills it (`monthly_reconcile`).
+- **Anomalies:** still computed at request time by `api/core.calendar_for_bbox` over the summed
+  area (robust z against the same calendar month in other years, |z| ≥ 3, MIN_COUNT 10,
+  `low_confidence` for pre-2012 support < 30). Cell rows store no z. Phase 5 makes the API exclude
+  partial months from the z baseline and give them flag `partial`, because comparing an incomplete
+  month with full months creates false "low" anomalies.
 - **Drift monitor:** for complete months where both MODIS and the VIIRS reference exist, compare
   `MODIS × k` with the observed reference at region-month level. Report % error on the job. A
   value above `DRIFT_WARN_PCT` (default 40) is a soft flag, not a block.
@@ -139,15 +149,32 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
 3. If there are no new or modified rows **and** no pending rows (`needs_processing`): record the
    counts, set status `no_change`, stop. CrewAI is not imported.
 4. Affected set = distinct (cy, cx, year, month) of all pending rows.
-5. Run the CrewAI flow (§7) over these deterministic stages: filter → aggregate affected
-   cell-months → harmonize with the frozen calibration → partial-month and anomaly fields →
-   hard gates → drift monitor. Write results to staging under the job id.
-6. Publish (§8) or reject.
+5. Load **all** stored detections of the affected cell-months, not only the pending ones: a
+   cell-month's count is recomputed from everything in it.
+6. Run the CrewAI flow (§7) over these deterministic stages: filter → aggregate affected
+   cell-months → harmonize with the frozen calibration → completeness (`is_partial`) → hard gates
+   → drift monitor. Write results to staging under the job id.
 
-`monthly_reconcile`: for closed months whose SP coverage now exists and which still hold NRT
-rows, delete the NRT rows for the whole (source family, month, bbox) window and insert the SP rows.
-This is window replacement, not row matching, because NRT and SP positions can differ. Then
-recompute those cell-months through the same stages. Optionally propose a new calibration version
+Hard gates (any failure blocks publication):
+- G1 schema and range: counts are non-negative integers; keys are unique; every affected key
+  appears exactly once.
+- G2 conservation: for each sensor, the summed staged counts equal the number of detections that
+  passed the filter in the affected cell-months.
+- G3 missing ≠ zero (I7): no harmonized value is computed where the needed reference or MODIS data
+  is unavailable; such rows carry a null and a flag.
+- G4 frozen calibration (I6): every staged row uses the calibration version passed in.
+
+Soft flags (published, visible on the job and the row): `partial`, `reference_pending`,
+`mixed_reference`, drift above `DRIFT_WARN_PCT`, and a country-clip or mask drop share far above
+its recent level.
+7. Publish (§8) or reject.
+
+`monthly_reconcile` is an SP ingestion job; processing is shared with `firms_poll`. It runs over
+every closed month after the approved dataset's last complete month whose SP data now exists. That
+includes the 2026 months missing from the historical dataset, which ends in 2025. For each such
+month and source family, it deletes the NRT rows for the whole (source family, month, bbox) window
+and inserts the SP rows, marking them pending. This is window replacement, not row matching,
+because NRT and SP positions can differ. The pending rows then go through the same stages. Optionally propose a new calibration version
 (k, r, mask); it is approved only if its held-out `error_pct_cell_month_ratio` is no worse than
 the current version's by more than `RECAL_TOLERANCE_PP` (default 0.5).
 
@@ -270,7 +297,8 @@ there with a one-line comment.
 |---|---|---|
 | 0 | Integration base | Monorepo layout; 46 passed + 2 xfailed; compose parses; no other ref changed |
 | 1 | Scheduler + FIRMS ingestion | I4, I5, interval config; fetch + availability against fixtures; restart and duplicate scenarios |
-| 2 | Incremental processing | Natural-key diff; shared filter + mask; affected-only recompute equals full recompute; partial months; reference switch; I3, I6, I7 |
+| 2a | Processing science (pure Python) | Shared filter + clip + mask; recompute of selected cell-months equals the full `calibrate.harmonize` result; completeness; reference switch; inter-VIIRS fit; gates G1–G4; I6, I7 |
+| 2b | Processing data flow (PostgreSQL) | Pending → affected keys → all detections of those cell-months; `monthly_reconcile` SP ingestion with window replacement; coverage from `firms_fetches`; I3 |
 | 3 | CrewAI + OpenRouter | Flow order fixed; typed verdict; fallback chain with stub models; downgrade-only; I8 |
 | 4 | Persistence + job tracking | Alembic migrations; atomic promotion; forced mid-promotion failure leaves approved identical (I2); rollback; bootstrap |
 | 5 | FastAPI | Existing contracts unchanged; `/processing/*`; I1; passport int-year bug fixed; dynamic end year |
@@ -288,3 +316,8 @@ there with a one-line comment.
   calibration version records both.
 - The frontend's other pages use mock data, and its region list does not match the backend's
   areas. Wiring them up is a separate phase after Phase 5.
+- **No real data is available yet.** The repo and this machine have no `harmonized.parquet`, no
+  raw FIRMS archive and no boundary file. The real calibration (k), the history bootstrap, the
+  static-source mask and the inter-VIIRS factor all need the FIRMS public yearly country files for
+  Tunisia and Algeria; the country clip needs a boundary file. Until then, code is built and tested
+  on synthetic data, and the real artefacts are produced by committed CLIs once the data exists.
