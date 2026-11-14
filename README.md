@@ -11,10 +11,42 @@ pip install -r requirements.txt
 python pipeline/ingest.py data/raw data/cells.parquet 34   # 34 = keep north of 34N (drops Saharan gas flares)
 # 2. Fit MODIS->VIIRS ratios, validate on held-out years, write the harmonized series
 python pipeline/calibrate.py data/cells.parquet data/harmonized.parquet
-# 3. Serve the calendar
+# 3. Serve the API (data path: env EMBER_DATA, default data/harmonized.parquet)
 uvicorn api.main:app --reload --port 8000
-# GET http://localhost:8000/calendar?bbox=8.0,35.0,11.0,37.5&start=2003&end=2025
+# GET http://localhost:8000/calendar?area=bizerte&start=2003&end=2025
+# 4. Offline demo fallback: writes web/backup/<area_id>.json + validation.json from the real data
+python scripts/export_backups.py
 ```
+
+Tests (synthetic data in a tmp dir, never the real files):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+## Deploy (Render, free web service)
+
+1. Commit the files the API serves: `data/harmonized.parquet`, `data/harmonized_validation.json`
+   (small) and `data/areas.json`. Never commit `data/raw/`: it is gitignored because the raw CSVs
+   are ~127 MB and one file is over GitHub's 100 MB limit.
+2. Merge to `main` and push. `render.yaml` deploys from `main`.
+3. Render dashboard: **New > Blueprint**, pick this GitHub repo, apply. `render.yaml` sets the free
+   plan, `pip install -r requirements.txt`, the start command
+   `uvicorn api.main:app --host 0.0.0.0 --port $PORT`, the health check `/health` and
+   `PYTHON_VERSION=3.11.9`.
+   Without Blueprints: **New > Web Service**, runtime Python, same build and start commands,
+   env var `PYTHON_VERSION=3.11.9`, health check path `/health`.
+4. Open `https://<service>.onrender.com/health`: expect `"status": "ok"` and the real row count.
+   A 503 there means the data files were not committed, and Render marks the deploy as failed.
+
+Notes:
+- Free instances sleep after about 15 minutes idle, and the next request takes up to a minute.
+  Open `/health` a few minutes before the demo.
+- The core API needs no secrets. Any API keys for the teammate routers go in Render's
+  **Environment** tab, never in the repo.
+- If the server dies mid-demo, the front end can read `web/backup/*.json` (same JSON as the API).
+  Run `python scripts/export_backups.py` once the real data is in place, then commit `web/backup/`.
 
 ## API contract (front end builds against `web/mock_calendar.json`)
 

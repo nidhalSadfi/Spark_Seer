@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+# Raw FIRMS CSVs: ~127 MB, one file is over GitHub's 100 MB limit. Download them locally (see README).
+data/raw/
