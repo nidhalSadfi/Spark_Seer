@@ -1,16 +1,17 @@
-# React + Vite
+# Spark Seer
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Satellite fire-intelligence dashboard (NASA Space Apps 2026) that harmonizes MODIS and VIIRS active-fire records into an activity calendar with historical anomaly analysis.
 
-Currently, two official plugins are available:
+Stack: React + Vite, Tailwind CSS v4, Motion, ECharts, TanStack Query/Table, NumberFlow, Sonner, Lucide.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+npm install
+npm run dev
+```
 
-## React Compiler
+## Status
+- All data is **illustrative mock data** generated in `src/services/fireApi.js`. Replace the bodies of those functions with real API calls; the rest of the UI only depends on their return shapes.
+- **Map is intentionally blank** (`src/components/map/FireMap.jsx`), owned by another team member. Integration contract is documented at the top of that file: read filters via `useFilters()`, call `setAoi(...)` when an AOI is drawn.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Structure
+`components/{layout,dashboard,map,calendar,analytics,common,ui}`, `pages/`, `services/`, `hooks/`, `context/`, `utils/`
