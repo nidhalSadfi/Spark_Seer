@@ -1,8 +1,8 @@
 """Scientific constants of the processing stages (spec §5), in one frozen object with defaults.
 
 These are not environment variables: changing one changes the science, so it is a code change
-with tests. Deployment settings (file paths, the drift threshold) live in backend/settings.py; the
-worker copies `DRIFT_WARN_PCT` into `drift_warn_pct` when it builds the params.
+with tests. Deployment settings (file paths, the drift thresholds) live in backend/settings.py; the
+worker copies `DRIFT_WARN_PCT` and `DRIFT_MIN_COUNT` into the params it builds.
 """
 
 from __future__ import annotations
@@ -38,8 +38,11 @@ class ProcessingParams:
     mask_types: tuple[int, ...] = (1, 2, 3)  # FIRMS type 1 volcano, 2 other static land source, 3 offshore
     # Country clip (ISO 3166-1 alpha-3).
     country_codes: tuple[str, ...] = ("TUN", "DZA")
-    # Soft flags. drift_warn_pct mirrors the DRIFT_WARN_PCT setting (default 40).
+    # Soft flags. drift_warn_pct / drift_min_count mirror the DRIFT_WARN_PCT (default 40) and
+    # DRIFT_MIN_COUNT (default 50) settings: below drift_min_count summed VIIRS reference detections,
+    # a region-month is "insufficient_data" (small counts swing by chance) and never flagged.
     drift_warn_pct: float = 40.0
+    drift_min_count: float = 50.0
     # A clip or mask drop share is "far above its recent level" when it exceeds both
     # factor x the recent share and the recent share + min_pp percentage points.
     drop_share_factor: float = 3.0
@@ -56,6 +59,8 @@ class ProcessingParams:
             raise ValueError("mask_min_count must be >= 1")
         if self.drift_warn_pct <= 0:
             raise ValueError("drift_warn_pct must be > 0")
+        if self.drift_min_count < 0:
+            raise ValueError("drift_min_count must be >= 0")
 
 
 DEFAULT_PARAMS = ProcessingParams()

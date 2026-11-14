@@ -9,7 +9,8 @@ from settings import DEFAULT_REGION_BBOX, Settings, SettingsError
 
 ENV_VARS = ("DATABASE_URL", "FIRMS_MAP_KEY", "FIRMS_MAP_KEY_1", "FIRMS_POLL_INTERVAL_HOURS", "FIRMS_BBOX",
             "FIRMS_MAX_BACKFILL_DAYS", "FIRMS_RAW_DIR", "WORKER_LEASE_SECONDS", "WORKER_TICK_SECONDS",
-            "RECONCILE_DAY_OF_MONTH", "COUNTRY_BOUNDARY_FILE", "STATIC_MASK_FILE", "DRIFT_WARN_PCT")
+            "RECONCILE_DAY_OF_MONTH", "COUNTRY_BOUNDARY_FILE", "STATIC_MASK_FILE", "DRIFT_WARN_PCT",
+            "DRIFT_MIN_COUNT")
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +27,8 @@ def test_defaults():
     assert s.firms_raw_dir == Path("data/raw/firms")
     assert (s.worker_lease_seconds, s.worker_tick_seconds, s.reconcile_day_of_month) == (300, 60, 5)
     # Processing: no boundary or mask file by default (the rules are then reported as disabled).
-    assert (s.country_boundary_file, s.static_mask_file, s.drift_warn_pct) == (None, None, 40.0)
+    assert (s.country_boundary_file, s.static_mask_file) == (None, None)
+    assert (s.drift_warn_pct, s.drift_min_count) == (40.0, 50.0)
 
 
 def test_default_bbox_is_the_whole_region():
@@ -61,6 +63,7 @@ def test_env_overrides(monkeypatch):
     monkeypatch.setenv("COUNTRY_BOUNDARY_FILE", "data/boundary.geojson")
     monkeypatch.setenv("STATIC_MASK_FILE", "data/mask.json")
     monkeypatch.setenv("DRIFT_WARN_PCT", "25.5")
+    monkeypatch.setenv("DRIFT_MIN_COUNT", "0")
     s = Settings.from_env()
     assert s.database_url.endswith("/db") and s.firms_map_key == "primary"
     assert s.firms_poll_interval == timedelta(minutes=30)
@@ -68,7 +71,7 @@ def test_env_overrides(monkeypatch):
     assert (s.firms_max_backfill_days, s.firms_raw_dir) == (7, Path("/var/firms"))
     assert (s.worker_lease_seconds, s.worker_tick_seconds, s.reconcile_day_of_month) == (120, 15, 28)
     assert s.country_boundary_file == Path("data/boundary.geojson") and s.static_mask_file == Path("data/mask.json")
-    assert s.drift_warn_pct == 25.5
+    assert s.drift_warn_pct == 25.5 and s.drift_min_count == 0
 
 
 def test_empty_values_fall_back_to_defaults(monkeypatch):
@@ -102,6 +105,8 @@ def test_secrets_not_in_repr(monkeypatch):
     ("DRIFT_WARN_PCT", "0"),
     ("DRIFT_WARN_PCT", "forty"),
     ("DRIFT_WARN_PCT", "nan"),
+    ("DRIFT_MIN_COUNT", "-1"),
+    ("DRIFT_MIN_COUNT", "fifty"),
 ])
 def test_invalid_values_name_the_variable(monkeypatch, name, value):
     monkeypatch.setenv(name, value)

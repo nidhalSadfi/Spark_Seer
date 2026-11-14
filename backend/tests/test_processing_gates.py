@@ -199,13 +199,32 @@ def test_run_gates_returns_json_ready_results(good):
 def test_drift_hand_computed(good):
     d = drift_monitor(good.staged)
     # July 2019, complete: MODIS x k = 10 x 2.5 + 5 x 3.0 + 0 x 2.0 (cell 75,20 uses k_month) = 40;
-    # S-NPP = 30 + 20 + 0 = 50 -> |40 - 50| / 50 = 20 %. 2010 (MODIS*k) and partial Nov 2026 are left out.
+    # S-NPP = 30 + 20 + 0 = 50 (exactly DRIFT_MIN_COUNT, so evaluated) -> |40 - 50| / 50 = 20 %.
+    # 2010 (MODIS*k) and partial Nov 2026 are left out.
     assert d.months == [{"month": "2019-07", "cells": 3, "modis_k": 40.0, "viirs_ref": 50.0, "error_pct": 20.0,
-                         "flagged": False}]
+                         "status": "ok", "flagged": False}]
+    assert d.min_count == 50
     tight = drift_monitor(good.staged, ProcessingParams(drift_warn_pct=15))
-    assert tight.flagged == ["2019-07"] and tight.warn_pct == 15
+    assert tight.flagged == ["2019-07"] and tight.warn_pct == 15 and tight.months[0]["status"] == "warn"
     flags = soft_flags(good.staged, tight)
     assert {"flag": "drift_above_warn", "warn_pct": 15, "months": ["2019-07"]} in flags
+
+
+def test_drift_below_min_count_is_insufficient_and_never_flagged(good):
+    d = drift_monitor(good.staged, ProcessingParams(drift_warn_pct=1, drift_min_count=51))
+    assert d.months == [{"month": "2019-07", "cells": 3, "modis_k": 40.0, "viirs_ref": 50.0, "error_pct": None,
+                         "status": "insufficient_data", "flagged": False}]
+    assert d.flagged == [] and not [f for f in soft_flags(good.staged, d) if f["flag"] == "drift_above_warn"]
+
+
+def test_drift_skips_months_whose_modis_is_not_fully_covered():
+    gap = [(f, "2000-11-01", 9500) for f in ("SNPP", "NOAA20", "NOAA21")]
+    gap += [("MODIS", "2000-11-01", (date(2019, 7, 15) - date(2000, 11, 1)).days),        # to Jul 14
+            ("MODIS", "2019-07-20", (date(2026, 11, 14) - date(2019, 7, 20)).days)]       # from Jul 20
+    res = process(detections(), KEYS, CAL, mask=None, boundary=None, coverage=gap, availability=AVAIL, now=NOW)
+    july = res.staged[(res.staged.year == 2019)]
+    assert not july.is_partial.any() and july.quality_flags.map(lambda fl: "modis_partial" in fl).all()
+    assert res.stage_summaries["drift"]["months"] == [] and res.passed
 
 
 def test_soft_flags_list_row_flags_and_drop_share_jumps(good):

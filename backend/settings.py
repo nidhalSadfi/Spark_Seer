@@ -40,6 +40,7 @@ class Settings:
     country_boundary_file: Path | None = None
     static_mask_file: Path | None = None
     drift_warn_pct: float = 40.0
+    drift_min_count: float = 50.0
 
     def __post_init__(self) -> None:
         _check(self.firms_poll_interval_hours > 0 and math.isfinite(self.firms_poll_interval_hours),
@@ -56,6 +57,8 @@ class Settings:
                self.reconcile_day_of_month)
         _check(self.drift_warn_pct > 0 and math.isfinite(self.drift_warn_pct), "DRIFT_WARN_PCT",
                "must be a number > 0", self.drift_warn_pct)
+        _check(self.drift_min_count >= 0 and math.isfinite(self.drift_min_count), "DRIFT_MIN_COUNT",
+               "must be a number >= 0", self.drift_min_count)
 
     @property
     def firms_poll_interval(self) -> timedelta:
@@ -89,6 +92,8 @@ class Settings:
             kw["static_mask_file"] = Path(v)
         if (v := _get("DRIFT_WARN_PCT")) is not None:
             kw["drift_warn_pct"] = _number("DRIFT_WARN_PCT", v, float)
+        if (v := _get("DRIFT_MIN_COUNT")) is not None:
+            kw["drift_min_count"] = _number("DRIFT_MIN_COUNT", v, float)
         return cls(**kw)
 
 
