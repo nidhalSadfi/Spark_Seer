@@ -9,7 +9,7 @@ from conftest import VALIDATION, YEARS, make_dataset
 
 REQUIRED = {"year", "month", "modis_raw", "viirs_raw", "harmonized", "support", "z", "flag"}
 FLAGS = {"high", "low", "normal", "low_confidence"}
-BIZERTE = "9.0,36.8,10.3,37.4"
+BIZERTE = "8.3,36.0,9.8,37.2"
 
 
 def test_health(client):
@@ -49,7 +49,7 @@ def test_calendar_by_bbox(client):
 
 def test_areas(client):
     areas = client.get("/areas").json()["areas"]
-    assert [a["id"] for a in areas] == ["bizerte", "nw_tunisia", "kabylie", "ne_algeria"]
+    assert [a["id"] for a in areas] == ["bizerte", "kabylie", "ne_algeria", "petite_kabylie"]
     for a in areas:
         x0, y0, x1, y1 = a["bbox"]
         assert a["name"] and x0 < x1 and y0 < y1
