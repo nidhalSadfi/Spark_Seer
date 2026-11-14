@@ -15,3 +15,7 @@ npm run dev
 
 ## Structure
 `components/{layout,dashboard,map,calendar,analytics,common,ui}`, `pages/`, `services/`, `hooks/`, `context/`, `utils/`
+
+## Landing page
+`/` is an interactive landing page (Hairline figures, ember particles, keyboard controls); the dashboard lives under `/dashboard`.
+Edit the challenge title/summary and the team name and members in `src/config/project.js` — empty fields show placeholders.

@@ -1,9 +1,10 @@
 import { lazy, Suspense } from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import DashboardLayout from './components/layout/DashboardLayout'
-import { Skeleton } from './components/ui/primitives'
 
-// Route-level code splitting keeps ECharts out of the initial bundle.
+// Route-level code splitting keeps ECharts and Hairline out of each other's bundles.
+// Dashboard pages suspend inside DashboardLayout, so the shell never flashes.
+const Landing = lazy(() => import('./pages/Landing'))
 const Overview = lazy(() => import('./pages/Overview'))
 const FireMapPage = lazy(() => import('./pages/FireMapPage'))
 const CalendarPage = lazy(() => import('./pages/CalendarPage'))
@@ -12,16 +13,17 @@ const DataExplorer = lazy(() => import('./pages/DataExplorer'))
 
 export default function App() {
   return (
-    <Suspense fallback={<Skeleton className="m-6 h-64" />}>
+    <Suspense fallback={<div className="min-h-screen bg-bg" />}>
       <Routes>
-        <Route element={<DashboardLayout />}>
+        <Route index element={<Landing />} />
+        <Route path="dashboard" element={<DashboardLayout />}>
           <Route index element={<Overview />} />
           <Route path="map" element={<FireMapPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="explorer" element={<DataExplorer />} />
-          <Route path="*" element={<Overview />} />
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   )

@@ -1,6 +1,7 @@
 import { Activity, CalendarClock, Gauge, Scale } from 'lucide-react'
 import { motion } from 'motion/react'
-import { Card, CardHeader, IllustrativeNotice, PageHeader } from '../components/ui/primitives'
+import { Card, CardHeader, IllustrativeNotice } from '../components/ui/primitives'
+import HeroBanner from '../components/dashboard/HeroBanner'
 import KPICard from '../components/dashboard/KPICard'
 import FireTrendChart from '../components/dashboard/FireTrendChart'
 import TopRegions from '../components/dashboard/TopRegions'
@@ -35,9 +36,10 @@ export default function Overview() {
 
   return (
     <>
-      <PageHeader
-        title="Global Overview"
-        description={`${regionName(region)} · ${sensorLabel(sensor)} detections. A quick operational summary of current fire activity against the historical baseline.`}
+      <HeroBanner
+        regionLabel={regionName(region)}
+        sensorLabel={sensorLabel(sensor)}
+        latest={kpi?.label}
       />
 
       <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-2 gap-4 xl:grid-cols-4">
@@ -58,19 +60,19 @@ export default function Overview() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <CardHeader title="Hotspot activity" subtitle="Interactive map preview" />
+          <CardHeader kicker="Geospatial" title="Hotspot activity" subtitle="Interactive map preview" />
           <FireMap height={300} compact />
         </Card>
-        <Card>
-          <CardHeader title="Top regions" subtitle="Latest month, ranked by hotspot count" />
+        <Card delay={0.08}>
+          <CardHeader kicker="Ranking" title="Top regions" subtitle="Latest month, ranked by hotspot count" />
           <TopRegions summaries={summaries} />
         </Card>
         <Card className="xl:col-span-2">
-          <CardHeader title="Monthly trend" subtitle="Last 36 months vs. historical median" />
+          <CardHeader kicker="Time series" title="Monthly trend" subtitle="Last 36 months vs. historical median" />
           <FireTrendChart matrix={matrix} />
         </Card>
-        <Card>
-          <CardHeader title="Anomaly alerts" subtitle="Regions deviating ≥ 20% from median" />
+        <Card delay={0.08}>
+          <CardHeader kicker="Watchlist" title="Anomaly alerts" subtitle="Regions deviating ≥ 20% from median" />
           <RecentActivity summaries={summaries} />
         </Card>
       </div>
