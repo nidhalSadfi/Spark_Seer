@@ -1,0 +1,22 @@
+# Local development stack. Values come from .env (copy .env.example); defaults below match it.
+# Only the database for now: the `api` and `worker` services arrive in later phases.
+services:
+  db:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-emberguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-emberguard}
+      POSTGRES_DB: ${POSTGRES_DB:-emberguard}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # $$ escapes Compose interpolation: the variables are expanded by the shell inside the container.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
