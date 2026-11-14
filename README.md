@@ -33,14 +33,22 @@ See `backend/README.md` for running the API, the data pipeline and the Render de
 Vite 8 needs Node `^20.19` or `>=22.12`. Then `cd frontend && npm install && npm run dev`.
 See `frontend/README.md`.
 
-## Database
+## Database and worker
 
 ```bash
 cp .env.example .env    # then fill in the keys you need
 docker compose up -d db
+set -a; . ./.env; set +a          # the Python code reads the environment, not .env
+cd backend
+alembic upgrade head              # creates the processing tables (alembic upgrade head --sql prints the DDL)
+python -m worker --once           # one scheduler tick; without --once it ticks every WORKER_TICK_SECONDS
+pytest -m pg                      # PostgreSQL tests against TEST_DATABASE_URL (skipped if unreachable)
 ```
 
-Only the `db` service exists for now; `api` and `worker` services arrive in later phases.
+The worker polls NASA FIRMS (`firms_poll`, every `FIRMS_POLL_INTERVAL_HOURS`) and stores raw
+detections; see `docs/processing/ARCHITECTURE.md`. Only the `db` service exists for now; `api` and
+`worker` services arrive in later phases. `docker/initdb/` creates the `emberguard_test` database
+when the db volume is first initialised.
 
 ## Where the code came from
 
