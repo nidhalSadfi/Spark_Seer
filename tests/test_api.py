@@ -26,10 +26,26 @@ def test_calendar_by_bbox(client):
     assert not {"low", "high", "MODIS_days", "VIIRS_days"} & body["months"][0].keys()  # never invented
 
 
+def test_areas(client):
+    areas = client.get("/areas").json()["areas"]
+    assert [a["id"] for a in areas] == ["bizerte", "nw_tunisia", "kabylie", "ne_algeria"]
+    for a in areas:
+        x0, y0, x1, y1 = a["bbox"]
+        assert a["name"] and x0 < x1 and y0 < y1
+
+
+def test_calendar_by_area_matches_bbox(client):
+    by_area = client.get("/calendar?area=bizerte&start=2008&end=2015").json()
+    check_calendar(by_area, 2008, 2015)
+    assert by_area == client.get(f"/calendar?bbox={BIZERTE}&start=2008&end=2015").json()
+    assert client.get("/calendar?area=kabylie&start=2008&end=2015").json()["meta"]["cells"] == 1
+
+
+def test_calendar_400s(client):
+    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d"]:
+        assert client.get("/calendar" + query).status_code == 400, query
+
+
 def test_calendar_empty_area(client):
     body = client.get("/calendar?bbox=20,10,21,11").json()
     assert body == {"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}
-
-
-def test_calendar_bad_bbox(client):
-    assert client.get("/calendar?bbox=1,2,3").status_code == 400

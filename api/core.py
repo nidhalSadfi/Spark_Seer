@@ -6,10 +6,12 @@ as <name>_validation.json, as written by pipeline/calibrate.py.
 import json
 import os
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+AREAS_FILE = Path(__file__).resolve().parent.parent / "data" / "areas.json"  # ships with the code
 CELL_DEG = 0.5
 MIN_SUPPORT = 30  # MODIS detections behind a ratio before we call it "reliable"
 MIN_COUNT = 10    # months below this (and normally below it) are never flagged as anomalies
@@ -44,6 +46,15 @@ def get_data() -> pd.DataFrame:
 def get_validation() -> dict:
     """Held-out validation report written by pipeline/calibrate.py."""
     return dict(_read_json(validation_path()))
+
+
+def get_areas() -> list[dict]:
+    """Named demo areas: [{"id", "name", "bbox": [minLon, minLat, maxLon, maxLat]}, ...]."""
+    return _read_json(str(AREAS_FILE))
+
+
+def get_area(area_id: str) -> dict | None:
+    return next((a for a in get_areas() if a["id"] == area_id), None)
 
 
 def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int, end: int) -> dict:
