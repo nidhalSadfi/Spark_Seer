@@ -1,10 +1,12 @@
-# Render Blueprint (free web service). Dashboard: New > Blueprint > pick this repo. Steps in README.
+# Render Blueprint (free web service). Dashboard: New > Blueprint > pick this repo. Steps: backend/README.md (Deploy).
+# Must live at the repo root (Render only reads it there); the API itself is in backend/, hence rootDir.
 services:
   - type: web
     name: emberledger-api
     runtime: python
     plan: free
     branch: main                 # deploys on every merge to main
+    rootDir: backend             # monorepo: build and start commands run inside backend/
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health     # 503 (deploy fails) if data/harmonized.parquet is not committed
