@@ -205,11 +205,30 @@ the current version's by more than `RECAL_TOLERANCE_PP` (default 0.5).
   (approve → hold or reject), never upgrade a failed gate. `hold` keeps the staging rows unpublished
   for review.
 - LLM access goes only through `backend/worker/llm.py`: OpenRouter with `OPENROUTER_MODELS` tried
-  in order, each with a timeout and bounded retries. Every attempt is recorded (`llm_attempts`:
-  model, start, latency, outcome, error class, token counts if returned).
-  - All models failed → D3 (publish on hard gates, `ai_review = "unavailable"`).
-  - `OPENROUTER_MODELS` empty → `ai_review = "disabled"`.
-- Tests use a stub LLM. No test calls OpenRouter.
+  in order, each with a timeout and bounded retries. The whole review deadline is
+  `REVIEW_DEADLINE_S`. Every attempt is recorded (`llm_attempts`: model, start, latency, outcome,
+  error class, token counts if returned). Phase 3 returns attempts as data; Phase 4 persists them.
+- An attempt fails on an error, a timeout, a rate limit, or **invalid output**: a verdict that does
+  not parse, flagged keys outside the affected set, or reasons containing a number not present in
+  the tool results (I8, reusing `check_numbers` from `backend/api/passport.py`). A failed attempt
+  moves on to the next model.
+- Decision (deterministic, `decide()`):
+
+  | Situation | Decision | `ai_review` |
+  |---|---|---|
+  | Any hard gate failed | `reject` (the LLM cannot upgrade) | as it happened |
+  | Gates passed, valid verdict | the verdict's `approve` / `hold` / `reject` | `completed` |
+  | Gates passed, every model failed | `approve` (D3) | `unavailable` |
+  | Gates passed, `OPENROUTER_MODELS` empty | `approve`; crewai is not imported | `disabled` |
+
+- Privacy and isolation: CrewAI telemetry is switched off (`CREWAI_DISABLE_TELEMETRY=true`,
+  `OTEL_SDK_DISABLED=true`) before `crewai` is imported. Agent memory, knowledge, planning and
+  embeddings stay off. Every agent gets an explicit OpenRouter LLM, so nothing falls back to a
+  default provider. Prompts carry stage summaries only: no raw detection rows, no personal data.
+- Dependencies: `crewai` goes in `backend/requirements-worker.txt` (which includes
+  `requirements.txt`), never in the API's `requirements.txt`.
+- Tests use a stub LLM, and sockets are blocked during flow tests. No test calls OpenRouter or any
+  telemetry endpoint.
 
 ## 8. Persistence (PostgreSQL, SQLAlchemy 2 + psycopg 3, Alembic)
 
