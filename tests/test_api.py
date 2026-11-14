@@ -1,5 +1,11 @@
+import importlib
+import sys
+import types
+
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
+import api.main
 from api.main import app
 from conftest import VALIDATION, YEARS, make_dataset
 
@@ -78,3 +84,14 @@ def test_validation_series_passthrough(tmp_path, monkeypatch):
 def test_calendar_empty_area(client):
     body = client.get("/calendar?bbox=20,10,21,11").json()
     assert body == {"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}
+
+
+def test_teammate_router_included_when_present(monkeypatch):
+    router = APIRouter()
+    router.get("/passport/ping")(lambda: {"ok": True})
+    monkeypatch.setitem(sys.modules, "api.passport", types.SimpleNamespace(router=router))
+    try:
+        assert TestClient(importlib.reload(api.main).app).get("/passport/ping").json() == {"ok": True}
+    finally:
+        monkeypatch.delitem(sys.modules, "api.passport")
+        importlib.reload(api.main)  # back to the app without the fake router

@@ -4,14 +4,29 @@ Run:  uvicorn api.main:app --reload --port 8000
 Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLat)
       GET /calendar?area=bizerte                     (ids from GET /areas)
 """
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api import core
 
+log = logging.getLogger("uvicorn.error")
 app = FastAPI(title="EmberLedger")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
+# Teammate routers (api/passport.py, api/weather.py): optional, so the app starts without them.
+try:
+    from api.passport import router as passport_router
+    app.include_router(passport_router)
+except ImportError as e:
+    log.warning("passport router not loaded: %s", e)
+try:
+    from api.weather import router as weather_router
+    app.include_router(weather_router)
+except ImportError as e:
+    log.warning("weather router not loaded: %s", e)
 
 
 @app.exception_handler(FileNotFoundError)
