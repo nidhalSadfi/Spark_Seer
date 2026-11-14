@@ -3,6 +3,10 @@ import EChart, { FIRE_SCALE, axisStyle, tooltipStyle } from '../common/EChart'
 import { Skeleton } from '../ui/primitives'
 import { MONTHS, anomalyPct, historicalMedian } from '../../utils/stats'
 import { fmtInt, fmtPct } from '../../utils/format'
+import { FLAGS } from '../../services/constants'
+
+// Cells the API flags as statistical outliers get a coloured outline (harmonized series only).
+const FLAG_BORDER = { high: '#ef4444', low: '#38bdf8' }
 
 /**
  * Year × month heatmap of hotspot counts.
@@ -23,9 +27,14 @@ export default function FireCalendar({ matrix, startYear, endYear, selected, onS
         if (v == null) return
         max = Math.max(max, v)
         const isSel = selected && selected.year === y && selected.month === m
+        const flagColor = matrix.meta.sensor === 'harmonized' ? FLAG_BORDER[matrix.flags[yi][m]] : undefined
         cells.push({
           value: [m, ri, v],
-          itemStyle: isSel ? { borderColor: '#ffffff', borderWidth: 2 } : undefined,
+          itemStyle: isSel
+            ? { borderColor: '#ffffff', borderWidth: 2 }
+            : flagColor
+              ? { borderColor: flagColor, borderWidth: 2 }
+              : undefined,
         })
       }),
     )
@@ -37,7 +46,10 @@ export default function FireCalendar({ matrix, startYear, endYear, selected, onS
           const [m, ri, v] = value
           const year = rows[ri].y
           const base = historicalMedian(matrix, year, m)
-          return `<b>${MONTHS[m]} ${year}</b><br/>Hotspots: ${fmtInt(v)}<br/>Median: ${fmtInt(base)}<br/>Anomaly: ${fmtPct(anomalyPct(v, base))}`
+          const yi = matrix.years.indexOf(year)
+          const flag = matrix.meta.sensor === 'harmonized' ? matrix.flags[yi][m] : null
+          const flagLine = flag ? `<br/>Flag: ${FLAGS[flag]?.label ?? flag} (z = ${matrix.z[yi][m]})` : ''
+          return `<b>${MONTHS[m]} ${year}</b><br/>Hotspots: ${fmtInt(v)}<br/>Median: ${fmtInt(base)}<br/>Anomaly: ${fmtPct(anomalyPct(v, base))}${flagLine}`
         },
       },
       xAxis: { type: 'category', data: MONTHS, position: 'top', ...axisStyle, splitArea: { show: false } },
