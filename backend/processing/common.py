@@ -30,11 +30,12 @@ PARTIAL = "partial"                              # month not complete (spec §5)
 REFERENCE_PENDING = "reference_pending"          # NOAA-20 needed but no approved r (spec §5, I7)
 MIXED_REFERENCE = "mixed_reference"              # S-NPP days up to its end + scaled NOAA-20 after
 REFERENCE_UNAVAILABLE = "reference_unavailable"  # the reference sensor has no fetched day this month (I7)
-MODIS_UNAVAILABLE = "modis_unavailable"          # MODIS has no fetched day this month (I7)
+MODIS_UNAVAILABLE = "modis_unavailable"          # MODIS has no fetched day this month (I7): modis null
+MODIS_PARTIAL = "modis_partial"                  # MODIS lacks some fetched days this month: modis is a floor
 # Row flags depend only on the row's own key, coverage and calibration, never on which other keys
 # are in the run, so recomputing selected keys gives the same rows as a full recompute. Drift is a
 # region-month measure over the run's rows: it is a job-level soft flag, not a row flag.
-ROW_FLAGS = (MIXED_REFERENCE, MODIS_UNAVAILABLE, PARTIAL, REFERENCE_PENDING, REFERENCE_UNAVAILABLE)
+ROW_FLAGS = (MIXED_REFERENCE, MODIS_PARTIAL, MODIS_UNAVAILABLE, PARTIAL, REFERENCE_PENDING, REFERENCE_UNAVAILABLE)
 
 
 def family_of(source) -> str | None:
@@ -112,24 +113,32 @@ def reference_for(year: int, month: int, snpp_end: date | None, first_viirs_year
     return REF_MIXED
 
 
-def expected_ranges(year: int, month: int, snpp_end: date | None,
-                    first_viirs_year: int) -> list[tuple[str, date, date]]:
-    """(family, first day, last day) each expected family must cover for this month, by calendar.
+def reference_ranges(year: int, month: int, snpp_end: date | None,
+                     first_viirs_year: int) -> list[tuple[str, date, date]]:
+    """(family, first day, last day) each VIIRS reference family is expected for, by calendar.
 
-    MODIS always; the reference family or families by `reference_for`. In the month that contains
-    snpp_end, S-NPP is expected up to snpp_end and NOAA-20 from the day after.
+    Empty before first_viirs_year. In the month that contains snpp_end, S-NPP is expected up to
+    snpp_end and NOAA-20 from the day after.
     """
     start, end = month_bounds(year, month)
-    out = [("MODIS", start, end)]
     ref = reference_for(year, month, snpp_end, first_viirs_year)
     if ref == REF_SNPP:
-        out.append(("SNPP", start, end))
-    elif ref == REF_NOAA20:
-        out.append(("NOAA20", start, end))
-    elif ref == REF_MIXED:
-        out.append(("SNPP", start, snpp_end))
-        out.append(("NOAA20", snpp_end + timedelta(days=1), end))
-    return out
+        return [("SNPP", start, end)]
+    if ref == REF_NOAA20:
+        return [("NOAA20", start, end)]
+    if ref == REF_MIXED:
+        return [("SNPP", start, snpp_end), ("NOAA20", snpp_end + timedelta(days=1), end)]
+    return []
+
+
+def expected_ranges(year: int, month: int, snpp_end: date | None,
+                    first_viirs_year: int) -> list[tuple[str, date, date]]:
+    """Families the harmonized value depends on, with the days each must cover (spec §5): MODIS for
+    the whole month before first_viirs_year, the reference family or families from it. MODIS does
+    not decide completeness from first_viirs_year on (its coverage only qualifies `modis`)."""
+    if year < first_viirs_year:
+        return [("MODIS", *month_bounds(year, month))]
+    return reference_ranges(year, month, snpp_end, first_viirs_year)
 
 
 def ym(year: int, month: int) -> str:

@@ -72,10 +72,11 @@ def test_end_to_end_with_mask_and_clip(boundary):
     s = res.staged.set_index(["cy", "cx", "year", "month"])
     octo = s.loc[(73, 18, 2026, 10)]
     assert (octo.modis, octo.n_snpp, octo.n_noaa20, octo.n_noaa21, octo.viirs_ref) == (16, 16, 16, 16, 16.0)
-    assert octo.is_partial and octo.quality_flags == ["partial"] and octo.k == 3.2   # first poll: October partial
+    assert octo.is_partial and octo.k == 3.2   # first poll: October partial, MODIS fetched from Oct 16 only
+    assert octo.quality_flags == ["modis_partial", "partial"]
     nov = s.loc[(73, 18, 2026, 11)]
     assert nov.reference == "mixed" and pd.isna(nov.harmonized)  # no approved r yet
-    assert nov.quality_flags == ["mixed_reference", "partial", "reference_pending"]
+    assert nov.quality_flags == ["mixed_reference", "modis_partial", "partial", "reference_pending"]
     assert s.loc[(72, 6, 2026, 10)].modis == 1 and s.loc[(74, 19, 2026, 11)].modis == 0
     json.dumps(res.summary())
     records = res.staged_records()
@@ -125,7 +126,8 @@ def test_summary_has_every_stage():
     res = run()
     assert set(res.stage_summaries) == {"inputs", "filter", "aggregate", "harmonize", "completeness", "drift"}
     c = res.stage_summaries["completeness"]["months"]
-    assert c["2026-10"]["complete"] is False and "MODIS: 16/31 days covered" in c["2026-10"]["reasons"][0]
+    assert c["2026-10"]["complete"] is False
+    assert c["2026-10"]["reasons"] == ["SNPP: 16/31 days covered from 2026-10-01 to 2026-10-31"]
     assert res.stage_summaries["inputs"]["params"]["min_lat"] == 34.0
     assert res.summary()["passed"] is True
 

@@ -16,8 +16,8 @@ import pandas as pd
 
 from .calibration import Calibration
 from .common import (FAMILIES, KEY_COLS, MODIS_UNAVAILABLE, REF_MIXED, REF_MODIS, REF_NOAA20, REFERENCE_PENDING,
-                     REFERENCE_UNAVAILABLE, REFERENCES, ROW_FLAGS, expected_ranges, jsonable, key_list, month_bounds,
-                     normalize_keys, reference_for)
+                     REFERENCE_UNAVAILABLE, REFERENCES, ROW_FLAGS, jsonable, key_list, month_bounds, normalize_keys,
+                     reference_for, reference_ranges)
 from .coverage import as_coverage
 from .drift import DriftSummary
 from .filters import FilterSummary
@@ -123,8 +123,7 @@ def gate_missing_not_zero(staged: pd.DataFrame, calibration: Calibration, covera
     for year, month in sorted(set(zip(staged.year.astype(int), staged.month.astype(int)))):
         start, end = month_bounds(year, month)
         ref = reference_for(year, month, calibration.snpp_end, params.first_viirs_year)
-        rng = [r for r in expected_ranges(year, month, calibration.snpp_end, params.first_viirs_year)
-               if r[0] != "MODIS"]
+        rng = reference_ranges(year, month, calibration.snpp_end, params.first_viirs_year)
         rows.append({"year": year, "month": month, "_ref": ref,
                      "_ref_ok": all(coverage.covered_days(f, a, b) > 0 for f, a, b in rng),
                      "_r_ok": calibration.r_for(month) is not None or ref not in (REF_NOAA20, REF_MIXED),

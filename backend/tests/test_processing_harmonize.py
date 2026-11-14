@@ -146,8 +146,8 @@ def test_month_not_ended_is_partial():
 def test_first_poll_backfill_leaves_october_partial():
     complete, reasons = month_status(2026, 10, first_poll(), AVAIL_NOW, NOW, SNPP_END)
     assert not complete
-    assert reasons == ["MODIS: 16/31 days covered from 2026-10-01 to 2026-10-31",
-                       "SNPP: 16/31 days covered from 2026-10-01 to 2026-10-31"]
+    # From 2012 only the reference decides completeness (spec §5): MODIS is not listed.
+    assert reasons == ["SNPP: 16/31 days covered from 2026-10-01 to 2026-10-31"]
     sp = Coverage.from_windows([(f, "2026-10-01", 31) for f in ("MODIS", "SNPP")])  # SP fills October
     assert month_status(2026, 10, sp, AVAIL_NOW, NOW, SNPP_END) == (True, [])
 
@@ -177,6 +177,37 @@ def test_straddle_month_expects_snpp_until_its_end_only():
 def test_pre_2012_month_only_needs_modis():
     cov = Coverage.full(["MODIS"], "2010-07-01", "2010-07-31")
     assert month_status(2010, 7, cov, {"MODIS": date(2026, 11, 14)}, NOW, SNPP_END) == (True, [])
+    half = Coverage.from_windows([("MODIS", "2010-07-01", 15)])
+    assert month_status(2010, 7, half, {"MODIS": date(2026, 11, 14)}, NOW, SNPP_END) == (
+        False, ["MODIS: 15/31 days covered from 2010-07-01 to 2010-07-31"])
+
+
+def test_modis_does_not_decide_completeness_from_2012():
+    """MODIS end rule (spec §5): a dark MODIS leaves a 2026 month complete when the reference is."""
+    snpp_only = Coverage.full(["SNPP"], "2026-09-01", "2026-09-30")
+    avail = {"SNPP": date(2026, 11, 14)}  # no MODIS availability either
+    assert month_status(2026, 9, snpp_only, avail, NOW, SNPP_END) == (True, [])
+    staged, _ = run(rows_for("VIIRS_SNPP_SP", "2026-09-10", 4), [(*A, 2026, 9)], coverage=snpp_only)
+    out, _ = completeness(staged.reset_index(), snpp_only, avail, NOW, SNPP_END)
+    r = out.iloc[0]
+    assert not r.is_partial and pd.isna(r.modis) and pd.isna(r.modis_days) and r.harmonized == 4.0
+    assert r.quality_flags == ["modis_unavailable"]
+
+
+def test_partly_covered_modis_keeps_its_count_with_modis_partial():
+    cov = Coverage.from_windows([("SNPP", "2026-09-01", 30), ("MODIS", "2026-09-01", 20)])
+    avail = {"SNPP": date(2026, 11, 14), "MODIS": date(2026, 11, 14)}
+    rows = rows_for("MODIS_SP", "2026-09-05", 3) + rows_for("VIIRS_SNPP_SP", "2026-09-05", 7)
+    staged, s = run(rows, [(*A, 2026, 9)], coverage=cov)
+    out, _ = completeness(staged.reset_index(), cov, avail, NOW, SNPP_END)
+    r = out.iloc[0]
+    assert not r.is_partial and (r.modis, r.modis_days, r.harmonized) == (3, 1, 7.0)
+    assert r.quality_flags == ["modis_partial"] and s.flags["modis_partial"] == 1
+    # Before 2012 MODIS is the value's own sensor: partly covered MODIS also makes the month partial.
+    pre = Coverage.from_windows([("MODIS", "2010-07-01", 20)])
+    staged, _ = run(rows_for("MODIS_SP", "2010-07-05", 3), [(*A, 2010, 7)], coverage=pre)
+    out, _ = completeness(staged.reset_index(), pre, {"MODIS": date(2026, 11, 14)}, NOW, SNPP_END)
+    assert out.iloc[0].is_partial and out.iloc[0].quality_flags == ["modis_partial", "partial"]
 
 
 def test_month_end_is_judged_in_utc():
@@ -194,6 +225,7 @@ def test_zero_detection_cell_is_partial_without_coverage_and_complete_with_it():
         out.set_index(["cy", "cx", "year", "month"]).loc[(*A, 2026, 10)]
     assert sep.is_partial and pd.isna(sep.modis) and "partial" in sep.quality_flags  # no fetch in September
     assert octo.is_partial and octo.modis == 0  # half-covered October: a known count, still partial
+    assert octo.quality_flags == ["modis_partial", "partial"]
     assert s.partial_months == 2 and s.partial_rows == 2
     full = Coverage.full(["MODIS", "SNPP"], "2026-09-01", "2026-10-31")
     staged, _ = run([], keys, coverage=full)

@@ -1,13 +1,15 @@
 """Complete vs partial months (spec §5).
 
-A cell-month is complete iff (a) the month has ended (UTC) and (b) every family expected for it
-by calendar (MODIS, plus the reference family or families: see common.expected_ranges) has a
-stored fetch window on every expected day, and that family's availability max_date is on or after
-its last expected day. Expected families do not depend on detections, so a cell with zero
-detections is still partial without coverage. Coverage is bbox-wide, so the answer is per month.
+A cell-month is complete iff (a) the month has ended (UTC) and (b) every family the harmonized
+value depends on (common.expected_ranges: MODIS before 2012, the reference family or families from
+2012) has a stored fetch window on every expected day, and that family's availability max_date is
+on or after its last expected day. Expected families are decided by calendar, not by detections,
+so a cell with zero detections is still partial without coverage. Coverage is bbox-wide, so the
+answer is per month.
 
 In the month that contains snpp_end, S-NPP is expected only up to snpp_end (and its max_date only
-needs to reach snpp_end), NOAA-20 from the day after.
+needs to reach snpp_end), NOAA-20 from the day after. From 2012 MODIS does not decide completeness
+(the end of Terra and Aqua must not leave every month partial); harmonize flags `modis` instead.
 """
 
 from __future__ import annotations

@@ -8,7 +8,8 @@ NOAA-21 never contributes. viirs_ref is the reference value in S-NPP terms (null
 
 Missing is not zero (I7): a family with no covered day in the month gets a null count; a value
 that needs it is null with a flag (`modis_unavailable`, `reference_unavailable`). Without an
-approved r, values that need NOAA-20 are null with `reference_pending`, never 0.
+approved r, values that need NOAA-20 are null with `reference_pending`, never 0. MODIS fetched on
+some days only keeps its count with flag `modis_partial`.
 """
 
 from __future__ import annotations
@@ -20,9 +21,9 @@ import numpy as np
 import pandas as pd
 
 from .calibration import Calibration, keys_with_k
-from .common import (FAMILIES, KEY_COLS, MIXED_REFERENCE, MODIS_UNAVAILABLE, REF_MIXED, REF_MODIS, REF_NOAA20,
-                     REF_SNPP, REFERENCE_PENDING, REFERENCE_UNAVAILABLE, ROW_FLAGS, counts_by, expected_ranges,
-                     jsonable, month_bounds, normalize_keys, reference_for, ym)
+from .common import (FAMILIES, KEY_COLS, MIXED_REFERENCE, MODIS_PARTIAL, MODIS_UNAVAILABLE, REF_MIXED, REF_MODIS,
+                     REF_NOAA20, REF_SNPP, REFERENCE_PENDING, REFERENCE_UNAVAILABLE, ROW_FLAGS, counts_by, jsonable,
+                     month_bounds, normalize_keys, reference_for, reference_ranges, ym)
 from .coverage import Coverage, as_coverage
 from .params import DEFAULT_PARAMS, ProcessingParams
 
@@ -51,20 +52,21 @@ class HarmonizeSummary:
 def month_table(months: pd.DataFrame, coverage: Coverage, calibration: Calibration,
                 params: ProcessingParams = DEFAULT_PARAMS) -> pd.DataFrame:
     """Per (year, month): reference, whether each family has any covered day in the month
-    (`cov_<FAMILY>`), whether the reference's own days are covered (`ref_covered`), and r."""
+    (`cov_<FAMILY>`), whether MODIS covers every day (`modis_full`), whether the reference's own
+    days are covered (`ref_covered`), and r."""
     rows = []
     for year, month in months[["year", "month"]].drop_duplicates().itertuples(index=False):
         start, end = month_bounds(int(year), int(month))
         ref = reference_for(int(year), int(month), calibration.snpp_end, params.first_viirs_year)
         row = {"year": int(year), "month": int(month), "reference": ref,
-               **{f"cov_{f}": coverage.covered_days(f, start, end) > 0 for f in FAMILIES}}
-        needed = [r for r in expected_ranges(int(year), int(month), calibration.snpp_end, params.first_viirs_year)
-                  if r[0] != "MODIS"]
+               **{f"cov_{f}": coverage.covered_days(f, start, end) > 0 for f in FAMILIES},
+               "modis_full": coverage.covered_days("MODIS", start, end) == end.day}
+        needed = reference_ranges(int(year), int(month), calibration.snpp_end, params.first_viirs_year)
         row["ref_covered"] = all(coverage.covered_days(f, a, b) > 0 for f, a, b in needed)
         r = calibration.r_for(int(month)) if ref in (REF_NOAA20, REF_MIXED) else None
         row["r"] = np.nan if r is None else r
         rows.append(row)
-    cols = ["year", "month", "reference", *[f"cov_{f}" for f in FAMILIES], "ref_covered", "r"]
+    cols = ["year", "month", "reference", *[f"cov_{f}" for f in FAMILIES], "modis_full", "ref_covered", "r"]
     return pd.DataFrame(rows, columns=cols).astype({"year": "int64", "month": "int64"})
 
 
@@ -124,6 +126,7 @@ def harmonize(counts: pd.DataFrame, affected_keys, calibration: Calibration, cov
     staged["is_partial"] = pd.array([pd.NA] * len(out), dtype="boolean")
     flags = {
         MODIS_UNAVAILABLE: staged["modis"].isna().to_numpy(),
+        MODIS_PARTIAL: (out.cov_MODIS & ~out.modis_full).to_numpy(),
         REFERENCE_UNAVAILABLE: ref_missing.to_numpy(),
         REFERENCE_PENDING: r_missing.to_numpy(),
         MIXED_REFERENCE: (ref == REF_MIXED).to_numpy(),
