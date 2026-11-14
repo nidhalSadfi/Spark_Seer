@@ -10,3 +10,6 @@ tzdata          # zoneinfo fallback for api/weather.py if the host has no system
 requests>=2.31,<3         # firms_tool: HTTP calls to the FIRMS area API, archive index and portal
 PyYAML>=6.0,<7            # firms_tool/config.py: YAML request files
 beautifulsoup4>=4.12,<5   # firms_tool/portal.py: parses FIRMS download-portal pages
+sqlalchemy>=2.0,<3        # worker/, migrations/: database access (Core) for the processing tables
+psycopg[binary]>=3.1,<4   # SQLAlchemy driver for PostgreSQL (postgresql+psycopg:// URLs)
+alembic>=1.13,<2          # migrations/: schema migrations for the processing tables
