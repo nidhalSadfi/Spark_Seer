@@ -124,6 +124,20 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
   FIRMS missing-data endpoint once a MAP_KEY is available. Reference: in the Australia exploration
   NOAA-20/S-NPP has a median of 0.98 (IQR 0.97–0.99), so r ≈ 1.02. A regional result far from that
   must be explained before approval.
+  - **Fit pool (decision 2026-11-15).** Fitted on Tunisia + Algeria alone, r = 1.063, and on
+    2024–2025 it does worse than no correction (18.9% vs 13.4% error), because the region's counts
+    are small and noisy. The two satellites share an orbit and an instrument, so r is fitted on a
+    wider pool instead: the yearly country files of Morocco, Spain, Portugal, Italy, Greece and
+    Turkey, with the same filter (north of 34°N), train years and outage exclusions. It is then
+    validated on Tunisia + Algeria over the test years, which is out of region and out of time.
+    Result: r_global = 0.983 (per-country values 0.95–0.99), with an error of 12.6% on Tunisia +
+    Algeria 2024–2025.
+  - **Acceptance rule.** A fitted r is approved only if its validation error on Tunisia + Algeria
+    is lower than r = 1's. Otherwise r = 1 is approved. Only the global r is used; the per-month
+    values are reported but not applied, because they overfit.
+  - **Calibration version 1** carries r_global = 0.983 (status `approved`), with the fit report
+    (pool countries, file list, errors for r = 1, the global r and the per-month r) stored in its
+    validation report.
 - **Complete vs partial months:** a cell-month is complete only if (a) the month has ended (UTC)
   and (b) every sensor family that the **harmonized value depends on** has stored fetches
   (`firms_fetches` windows, NRT or SP) covering each day it is expected, and that family's
@@ -196,8 +210,10 @@ the current version's by more than `RECAL_TOLERANCE_PP` (default 0.5).
 ## 7. CrewAI orchestration and OpenRouter
 
 - A CrewAI **Flow** defines the stage order in code. Agents do not choose which stages run.
-- Three agents, each with read-only tools returning typed results from the deterministic stages:
-  Filter reviewer, Harmonization reviewer, Validation reviewer.
+- Three agents, each given a typed, read-only summary of the deterministic stages: Filter
+  reviewer, Harmonization reviewer, Validation reviewer. The summary is put directly into the
+  task prompt, not behind a tool call (see the free-tier budget below). "Tool results" in I8 means
+  these summaries.
 - Output: a Pydantic verdict `{decision: approve | hold | reject, reasons: [str],
   flagged_keys: [(cy, cx, year, month)]}`. Agents receive summaries (counts, metrics, flagged
   keys), never raw detection rows, with a size cap.
@@ -220,6 +236,26 @@ the current version's by more than `RECAL_TOLERANCE_PP` (default 0.5).
   | Gates passed, valid verdict | the verdict's `approve` / `hold` / `reject` | `completed` |
   | Gates passed, every model failed | `approve` (D3) | `unavailable` |
   | Gates passed, `OPENROUTER_MODELS` empty | `approve`; crewai is not imported | `disabled` |
+
+- **Free-tier budget (decision 2026-11-15).** The project runs on OpenRouter's free models only.
+  On the free tier a key gets 50 free-model requests per day, and 8 polls a day share them.
+  - **Three requests per attempt at most.** Each agent's summary goes directly into its task
+    prompt, with no tool round trip, and each agent answers once (`max_iter = 1`). The verdict is
+    parsed from the Validation reviewer's raw answer by `validate_verdict`, with no CrewAI
+    conversion call. A failure moves on to the next model.
+  - **Quota check before the review.** `llm.py` reads the key's remaining free-model requests
+    from OpenRouter's key endpoint (`GET /api/v1/key`, `free_model_daily_requests.remaining`). If
+    fewer than 3 remain, no model is tried. The step records the reason `daily_quota`, and the run
+    is decided as "every model failed" (`approve` on the gates, `ai_review = "unavailable"`). If the
+    check itself fails, the review runs anyway.
+  - **Stop the chain on a daily-quota 429.** When a model fails with OpenRouter's daily free-quota
+    429, rather than a per-model upstream rate limit, the remaining models are skipped.
+  - **Models (2026-11-15, probed live).** `nvidia/nemotron-3.5-super-vl:free`, then
+    `inclusionai/ling-3.2-flash:free`, then `nvidia/nemotron-3-ultra-550b-a55b:free`. The list lives
+    in `.env`. Free models come and go, so it is re-probed when attempts keep failing.
+  - **Availability guarantee.** Because of D3, the quota, a rate limit or an outage of every model
+    never stops publication or the API. Only the review is missing for that run, and the
+    Processing Center shows it.
 
 - Privacy and isolation: CrewAI telemetry is switched off (`CREWAI_DISABLE_TELEMETRY=true`,
   `OTEL_SDK_DISABLED=true`) before `crewai` is imported. Agent memory, knowledge, planning and
@@ -355,8 +391,14 @@ there with a one-line comment.
   existing `viirs_raw` field reports those months without breaking its contract (it is 0 today).
 - January 2012 counts as a full S-NPP month (S-NPP starts 2012-01-20), as in
   `calibrate.harmonize`. This is kept for consistency with the published history.
-- **No real data is available yet.** The repo and this machine have no `harmonized.parquet`, no
-  raw FIRMS archive and no boundary file. The real calibration (k), the history bootstrap, the
-  static-source mask and the inter-VIIRS factor all need the FIRMS public yearly country files for
-  Tunisia and Algeria; the country clip needs a boundary file. Until then, code is built and tested
-  on synthetic data, and the real artefacts are produced by committed CLIs once the data exists.
+- **Real data (2026-11-15).** The FIRMS yearly SP country files for Tunisia and Algeria are now
+  under `backend/data/raw/`, which is gitignored. They cover MODIS 2001–2025, S-NPP 2012–2025 and
+  NOAA-20 2018–2025. They produced:
+  - `data/harmonized.parquet` and `harmonized_validation.json`: per-cell-month error 11.5%,
+    k_global 3.48;
+  - `data/static_mask.json`: 1,310 squares;
+  - `data/boundary_tun_dza.geojson`: Natural Earth 10m v5.1.2, TUN + DZA.
+
+  The neighbour files used for the r pool are not stored in the repo; the README gives the
+  `firms_tool archive` command that downloads them. A live FIRMS `data_availability` check confirmed that S-NPP NRT ends on 2026-11-02. Tests
+  still use synthetic data only.
