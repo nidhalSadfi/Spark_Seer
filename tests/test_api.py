@@ -8,6 +8,19 @@ FLAGS = {"high", "low", "normal", "low_confidence"}
 BIZERTE = "9.0,36.8,10.3,37.4"
 
 
+def test_health(client):
+    body = client.get("/health").json()
+    assert body["status"] == "ok" and body["rows"] > 0
+    assert body["data_file"].endswith("harmonized.parquet")
+
+
+def test_missing_data_is_503(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBER_DATA", str(tmp_path / "nope.parquet"))
+    c = TestClient(app)
+    for path in ["/health", "/validation", "/calendar?area=bizerte"]:
+        assert c.get(path).status_code == 503, path
+
+
 def check_calendar(body, start, end):
     months = body["months"]
     assert len(months) == 12 * (end - start + 1)

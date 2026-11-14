@@ -6,11 +6,22 @@ Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLa
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api import core
 
 app = FastAPI(title="EmberLedger")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
+
+@app.exception_handler(FileNotFoundError)
+def missing_data(request, exc):
+    return JSONResponse(status_code=503, content={"detail": f"data file not found: {exc.filename}"})
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "data_file": core.data_path(), "rows": len(core.get_data())}
 
 
 @app.get("/areas")
