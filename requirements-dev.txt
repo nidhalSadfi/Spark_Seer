@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest
+PyYAML          # harmonization-modis-viirs/firms_tool: FIRMS downloader (data build only)
+beautifulsoup4  # harmonization-modis-viirs/firms_tool

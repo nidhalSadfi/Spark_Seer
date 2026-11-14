@@ -4,7 +4,9 @@ Run:  uvicorn api.main:app --reload --port 8000
 Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLat)
       GET /calendar?area=bizerte                     (ids from GET /areas)
 """
+import importlib.util
 import logging
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -14,7 +16,9 @@ from fastapi.staticfiles import StaticFiles
 
 from api import core
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = ROOT / "web"
+METEO_DIR = ROOT / "meteomatics-weather"
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI(title="EmberLedger")
@@ -33,6 +37,32 @@ try:
     app.include_router(weather_router)
 except ImportError as e:
     log.warning("weather router not loaded: %s", e)
+
+
+def load_meteomatics():
+    """The Meteomatics router (meteomatics-weather/, teammate), or None if it cannot load.
+
+    Its modules import `pipeline.grid`, `pipeline.weather`... from their own folder. Neither
+    pipeline/ folder has an __init__.py, so with that folder on sys.path Python merges both into
+    one `pipeline` namespace (no module names overlap).
+    """
+    try:
+        if str(METEO_DIR) not in sys.path:
+            sys.path.append(str(METEO_DIR))
+        spec = importlib.util.spec_from_file_location(
+            "meteomatics_router", METEO_DIR / "api" / "weather_router_example.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (ImportError, OSError) as e:
+        log.warning("meteomatics router not loaded: %s", e)
+        return None
+
+
+# Mounted under /meteomatics: its own GET /weather would clash with api/weather.py's.
+meteomatics = load_meteomatics()
+if meteomatics is not None:
+    app.include_router(meteomatics.router, prefix="/meteomatics", tags=["meteomatics"])
 
 
 @app.exception_handler(FileNotFoundError)

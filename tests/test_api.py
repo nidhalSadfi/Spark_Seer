@@ -128,3 +128,11 @@ def test_root_redirects_to_demo_page(client):
     for asset in ["app.js", "style.css"]:
         assert client.get(f"/web/demo/{asset}").status_code == 200, asset
     assert client.get("/docs").status_code == 200
+
+
+def test_meteomatics_routes_mounted_under_prefix(client):
+    paths = app.openapi()["paths"]
+    assert {"/meteomatics/weather", "/meteomatics/weather/map", "/meteomatics/weather/grid-meta",
+            "/meteomatics/weather/cell/{grid_id}", "/meteomatics/weather/point",
+            "/meteomatics/fires/calendar"} <= paths.keys()
+    assert client.get("/meteomatics/weather/grid-meta").json()["cell_count"] == 35  # needs no cache
