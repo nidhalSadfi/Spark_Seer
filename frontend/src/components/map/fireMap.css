@@ -1,0 +1,104 @@
+/* Leaflet overrides and marker styles for the fire map. Marker HTML is built as strings
+   (Leaflet divIcons), so these are plain classes rather than Tailwind utilities. */
+
+.sg-map .leaflet-container {
+  background: #0b1220;
+  font-family: inherit;
+}
+.sg-basemap {
+  filter: brightness(0.8) contrast(1.12) saturate(0.9);
+}
+.sg-map .leaflet-control-attribution {
+  background: rgba(11, 18, 32, 0.72) !important;
+  color: #7c8ca3 !important;
+  font-size: 10px !important;
+}
+.sg-map .leaflet-control-attribution a {
+  color: #a7b5c8 !important;
+}
+
+/* fire cluster marker */
+.sg-fire {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.sg-fire svg {
+  position: relative;
+  width: var(--s, 18px);
+  height: var(--s, 18px);
+  filter: drop-shadow(0 0 4px rgba(255, 120, 40, 0.9));
+  transition: transform 0.15s ease;
+}
+.sg-fire:hover svg {
+  transform: scale(1.18);
+}
+.sg-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--h, 40px);
+  height: var(--h, 40px);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 160, 70, 0.55), rgba(255, 90, 30, 0.2) 42%, transparent 70%);
+  pointer-events: none;
+}
+.sg-core {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+}
+.sg-fire.is-selected::before,
+.sg-fire.is-selected::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border: 2px solid #38bdf8;
+  border-radius: 50%;
+  animation: sg-ring 2.4s ease-out infinite;
+  pointer-events: none;
+}
+.sg-fire.is-selected::after {
+  animation-delay: 1.2s;
+}
+@keyframes sg-ring {
+  0% { transform: scale(0.7); opacity: 1; }
+  100% { transform: scale(2.7); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sg-fire.is-selected::before,
+  .sg-fire.is-selected::after { animation: none; opacity: 0; }
+}
+
+/* label next to the selected fire */
+.sg-label {
+  display: inline-block;
+  transform: translate(22px, -50%);
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #2c405b;
+  background: rgba(13, 21, 36, 0.9);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+  color: #a7b5c8;
+  font-size: 11.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.sg-label b {
+  display: block;
+  color: #edf3fb;
+  font-size: 12.5px;
+  font-weight: 600;
+}
