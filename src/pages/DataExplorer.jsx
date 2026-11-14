@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { flexRender, getCoreRowModel, getPaginationRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileText } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge, Card, CardHeader, IllustrativeNotice, Notice, PageHeader, Select, Skeleton } from '../components/ui/primitives'
+import { motion } from 'motion/react'
+import { ActionButton, Badge, Card, CardHeader, IllustrativeNotice, Notice, PageHeader, Select, Skeleton } from '../components/ui/primitives'
 import { useHotspotRecords } from '../hooks/useFireData'
 import { useFilters } from '../context/FilterContext'
 import { CONFIDENCE_LEVELS, regionName, sensorLabel } from '../services/constants'
@@ -62,22 +63,20 @@ export default function DataExplorer() {
   return (
     <>
       <PageHeader
+        kicker="Retrieval"
         title="Data Explorer & Export"
         description={`Hotspot records for ${regionName(region)} · ${sensorLabel(sensor)}. Region and sensor come from the header filters.`}
         actions={
           <div className="flex gap-2">
-            <button
+            <ActionButton
+              icon={FileText}
               onClick={() => toast.info('AOI report generation is planned for a later iteration.')}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-sm text-muted hover:text-ink"
             >
-              <FileText className="size-4" aria-hidden /> AOI report
-            </button>
-            <button
-              onClick={exportCsv}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-fire px-3 text-sm font-medium text-[#1a0d02] hover:bg-orange-400"
-            >
-              <Download className="size-4" aria-hidden /> Download CSV
-            </button>
+              AOI report
+            </ActionButton>
+            <ActionButton variant="primary" icon={Download} onClick={exportCsv}>
+              Download CSV
+            </ActionButton>
           </div>
         }
       />
@@ -135,8 +134,14 @@ export default function DataExplorer() {
                       </td>
                     </tr>
                   ))
-                : table.getRowModel().rows.map((row) => (
-                    <tr key={row.id} className="border-b border-line/60 hover:bg-card-hi/60">
+                : table.getRowModel().rows.map((row, i) => (
+                    <motion.tr
+                      key={row.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.25, delay: Math.min(i, 14) * 0.02 }}
+                      className="border-b border-line/60 transition-colors hover:bg-fire/[0.06]"
+                    >
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} className="px-4 py-2.5 tabular-nums text-muted">
                           {cell.column.id === 'confidence' ? (
@@ -146,7 +151,7 @@ export default function DataExplorer() {
                           )}
                         </td>
                       ))}
-                    </tr>
+                    </motion.tr>
                   ))}
               {!isFetching && !rows.length && (
                 <tr>

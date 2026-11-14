@@ -47,16 +47,19 @@ export default function EChart({ option, onEvents, height = 280, ariaLabel }) {
   }, [])
 
   useEffect(() => {
-    chart.current?.setOption(
-      {
-        backgroundColor: 'transparent',
-        textStyle: { fontFamily: 'Inter Variable, Inter, system-ui, sans-serif', color: '#a7b5c8' },
-        animation: !reduced(),
-        animationDuration: 600,
-        ...option,
-      },
-      { notMerge: true },
-    )
+    // Merge mode (not notMerge): later updates morph the existing chart smoothly
+    // instead of replaying the entrance animation. Options must therefore
+    // overwrite optional props explicitly (e.g. `markLine: { data: [] }`).
+    chart.current?.setOption({
+      backgroundColor: 'transparent',
+      textStyle: { fontFamily: 'Inter Variable, Inter, system-ui, sans-serif', color: '#a7b5c8' },
+      animation: !reduced(),
+      animationDuration: 700,
+      animationEasing: 'cubicOut',
+      animationDurationUpdate: 450,
+      animationEasingUpdate: 'cubicInOut',
+      ...option,
+    })
   }, [option])
 
   return <div ref={ref} role="img" aria-label={ariaLabel} style={{ height, width: '100%' }} />

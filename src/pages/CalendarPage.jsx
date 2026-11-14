@@ -14,6 +14,7 @@ export default function CalendarPage() {
   return (
     <>
       <PageHeader
+        kicker="Core view"
         title="Fire Activity Calendar"
         description={`When does burning occur in ${regionName(region)}, and which years are unusual? ${sensorLabel(sensor)} hotspot counts by year and month.`}
       />
@@ -28,8 +29,8 @@ export default function CalendarPage() {
             onSelect={setSelected}
           />
         </Card>
-        <Card>
-          <CardHeader title="Cell details" />
+        <Card delay={0.1}>
+          <CardHeader kicker="Inspector" title="Cell details" />
           <CalendarDetails matrix={matrix} selected={selected} sensor={sensor} />
         </Card>
       </div>

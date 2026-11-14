@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { motion } from 'motion/react'
 import { MousePointerClick } from 'lucide-react'
 import EChart, { axisStyle, tooltipStyle } from '../common/EChart'
 import { Badge } from '../ui/primitives'
@@ -43,7 +44,7 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
             value: p.v,
             itemStyle: { color: p.y === selected.year ? '#f97316' : '#3b4b60', borderRadius: [3, 3, 0, 0] },
           })),
-          markLine: detail.baseline == null ? undefined : {
+          markLine: detail.baseline == null ? { data: [] } : {
             symbol: 'none',
             label: { formatter: 'median', color: '#38bdf8', fontSize: 10 },
             lineStyle: { color: '#38bdf8', type: 'dashed' },
@@ -58,7 +59,7 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
     return (
       <div className="grid h-full min-h-48 place-items-center text-center text-sm text-muted">
         <div className="flex flex-col items-center gap-2">
-          <MousePointerClick className="size-6 text-faint" aria-hidden />
+          <MousePointerClick className="size-6 text-faint motion-safe:animate-pulse" aria-hidden />
           Select a calendar cell to see its statistics.
         </div>
       </div>
@@ -66,7 +67,13 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <motion.div
+      key={`${selected.year}-${selected.month}`}
+      initial={{ opacity: 0, x: 14 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex flex-col gap-4"
+    >
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-lg font-semibold">
           {MONTHS[selected.month]} {selected.year}
@@ -97,6 +104,6 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
           : `Raw ${sensorLabel(sensor)} detections. Not directly comparable with other sensors.`}{' '}
         Baseline: median of this calendar month in all earlier years of the record.
       </p>
-    </div>
+    </motion.div>
   )
 }

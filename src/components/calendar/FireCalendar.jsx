@@ -62,6 +62,12 @@ export default function FireCalendar({ matrix, startYear, endYear, selected, onS
           itemStyle: { borderColor: '#0b1220', borderWidth: 2, borderRadius: 3 },
           emphasis: { itemStyle: { borderColor: '#fff', borderWidth: 1.5 } },
           label: { show: false },
+          // cells "ignite" in a diagonal wave: older years first, January → December
+          animationDuration: 500,
+          animationDelay: (idx) => {
+            const [m, ri] = cells[idx].value
+            return (rows.length - 1 - ri) * 22 + m * 14
+          },
         },
       ],
     }

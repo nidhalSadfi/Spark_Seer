@@ -1,3 +1,4 @@
+import { motion } from 'motion/react'
 import { useFilters } from '../../context/FilterContext'
 import { DATA_RANGE } from '../../services/fireApi'
 import { REGIONS, SENSORS } from '../../services/constants'
@@ -18,11 +19,18 @@ export function SensorSelector() {
               aria-checked={active}
               title={s.description}
               onClick={() => setSensor(s.id)}
-              className={`rounded-md px-3 text-sm transition-colors ${
-                active ? 'bg-fire/20 font-medium text-orange-200' : 'text-muted hover:text-ink'
+              className={`relative rounded-md px-3 text-sm transition-colors ${
+                active ? 'font-medium text-orange-200' : 'text-muted hover:text-ink'
               }`}
             >
-              {s.label}
+              {active && (
+                <motion.span
+                  layoutId="sensor-pill"
+                  className="absolute inset-0 rounded-md border border-fire/30 bg-fire/20"
+                  transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+                />
+              )}
+              <span className="relative">{s.label}</span>
             </button>
           )
         })}

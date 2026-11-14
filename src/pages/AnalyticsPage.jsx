@@ -22,12 +22,14 @@ export default function AnalyticsPage() {
   return (
     <>
       <PageHeader
+        kicker="Analysis"
         title="Historical Analytics"
         description={`Seasonality, long-term trends and unusual conditions for ${regionName(region)}.`}
       />
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="lg:col-span-2">
           <CardHeader
+            kicker="Long-term"
             title="Yearly totals by sensor"
             subtitle="Raw MODIS and VIIRS counts are shown separately from the harmonized estimate; they are not directly comparable."
           />
@@ -35,14 +37,15 @@ export default function AnalyticsPage() {
         </Card>
         <Card>
           <CardHeader
+            kicker="Anomaly"
             title="Monthly anomaly vs. historical median"
             subtitle={`${sensorLabel(sensor)} · % deviation from the median of all earlier years`}
             action={<Select label="Year" value={focusYear} onChange={(v) => setFocusYear(+v)} options={yearOptions} />}
           />
           <AnomalyChart matrix={matrix} year={focusYear} />
         </Card>
-        <Card>
-          <CardHeader title="Seasonal distribution" subtitle="Average share of annual hotspots per calendar month" />
+        <Card delay={0.08}>
+          <CardHeader kicker="Seasonality" title="Seasonal distribution" subtitle="Average share of annual hotspots per calendar month" />
           <SeasonalDistribution matrix={matrix} startYear={startYear} endYear={endYear} />
         </Card>
         <Card className="lg:col-span-2">

@@ -5,7 +5,7 @@ import FireMap from '../components/map/FireMap'
 export default function FireMapPage() {
   return (
     <>
-      <PageHeader title="Global Fire Map" description="Interactive geographic investigation workspace." />
+      <PageHeader kicker="Geospatial" title="Global Fire Map" description="Interactive geographic investigation workspace." />
       <FireMap height="calc(100vh - 220px)" />
     </>
   )
