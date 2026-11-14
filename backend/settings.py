@@ -1,4 +1,4 @@
-"""Typed settings for new backend code (worker, migrations), read from environment variables.
+"""Typed settings for new backend code (worker, migrations, processing), read from environment variables.
 
 All new code reads configuration through `Settings.from_env()` (spec §12). Variable names match
 the root `.env.example`. Empty values count as unset, so `VAR=` lines in a .env file fall back to
@@ -36,6 +36,10 @@ class Settings:
     worker_lease_seconds: float = 300.0
     worker_tick_seconds: float = 60.0
     reconcile_day_of_month: int = 5
+    # Processing (spec §5): unset files disable that rule, and the run reports it as disabled.
+    country_boundary_file: Path | None = None
+    static_mask_file: Path | None = None
+    drift_warn_pct: float = 40.0
 
     def __post_init__(self) -> None:
         _check(self.firms_poll_interval_hours > 0 and math.isfinite(self.firms_poll_interval_hours),
@@ -50,6 +54,8 @@ class Settings:
         # 1-28 so the day exists in every month.
         _check(1 <= self.reconcile_day_of_month <= 28, "RECONCILE_DAY_OF_MONTH", "must be between 1 and 28",
                self.reconcile_day_of_month)
+        _check(self.drift_warn_pct > 0 and math.isfinite(self.drift_warn_pct), "DRIFT_WARN_PCT",
+               "must be a number > 0", self.drift_warn_pct)
 
     @property
     def firms_poll_interval(self) -> timedelta:
@@ -77,6 +83,12 @@ class Settings:
             kw["worker_tick_seconds"] = _number("WORKER_TICK_SECONDS", v, float)
         if (v := _get("RECONCILE_DAY_OF_MONTH")) is not None:
             kw["reconcile_day_of_month"] = _number("RECONCILE_DAY_OF_MONTH", v, int)
+        if (v := _get("COUNTRY_BOUNDARY_FILE")) is not None:
+            kw["country_boundary_file"] = Path(v)
+        if (v := _get("STATIC_MASK_FILE")) is not None:
+            kw["static_mask_file"] = Path(v)
+        if (v := _get("DRIFT_WARN_PCT")) is not None:
+            kw["drift_warn_pct"] = _number("DRIFT_WARN_PCT", v, float)
         return cls(**kw)
 
 
