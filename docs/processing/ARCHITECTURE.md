@@ -118,23 +118,36 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
   either sensor are excluded from fit and test, because a dark satellite looks like "no fires". Known
   outages live in a committed file with their source (initially the satellite-level gaps from the
   Australia exploration: S-NPP 2022-07-27..08-10, 2024-05-30..06-03, 2024-07-10..07-15,
-  2024-07-25..07-28; NOAA-20 2023-07-19..07-22). Reference: in the Australia exploration
+  2024-07-25..07-28; NOAA-20 2023-07-19..07-22), plus S-NPP 2024-11 as a whole month. The
+  exploration attributes that outlier month to an S-NPP outage without listing its days. The list
+  holds only the longest runs (30 of S-NPP's 41 dark days). Phase 2b cross-checks it against the
+  FIRMS missing-data endpoint once a MAP_KEY is available. Reference: in the Australia exploration
   NOAA-20/S-NPP has a median of 0.98 (IQR 0.97–0.99), so r ≈ 1.02. A regional result far from that
   must be explained before approval.
 - **Complete vs partial months:** a cell-month is complete only if (a) the month has ended (UTC)
-  and (b) for every source that contributes to it, stored fetches (`firms_fetches` windows, NRT or
-  SP) cover every day of the month and that source's availability `max_date` is on or after the
-  month's last day. Otherwise it is partial: `is_partial = true`, flag `partial`. This also covers
-  the first poll, whose 30-day backfill starts mid-month: that month is not complete from NRT
-  alone, and only becomes complete once SP data fills it (`monthly_reconcile`).
+  and (b) every sensor family that the **harmonized value depends on** has stored fetches
+  (`firms_fetches` windows, NRT or SP) covering each day it is expected, and that family's
+  availability `max_date` is on or after its last expected day. Those families are MODIS before
+  2012 and the reference family or families from 2012. In the month that contains `snpp_end`,
+  S-NPP is expected only up to `snpp_end`, and NOAA-20 from the next day. Otherwise the month is
+  partial: `is_partial = true`, flag `partial`. This also covers the first poll, whose 30-day
+  backfill starts mid-month: that month is not complete from NRT alone, and only becomes complete
+  once SP data fills it (`monthly_reconcile`).
+  MODIS does not decide completeness from 2012 onward, so the end of Terra and Aqua cannot leave
+  every month partial forever. MODIS coverage only qualifies the `modis` column:
+  - some days uncovered → count kept, flag `modis_partial`;
+  - no day covered → null, flag `modis_unavailable`.
 - **Anomalies:** still computed at request time by `api/core.calendar_for_bbox` over the summed
   area (robust z against the same calendar month in other years, |z| ≥ 3, MIN_COUNT 10,
   `low_confidence` for pre-2012 support < 30). Cell rows store no z. Phase 5 makes the API exclude
   partial months from the z baseline and give them flag `partial`, because comparing an incomplete
   month with full months creates false "low" anomalies.
-- **Drift monitor:** for complete months where both MODIS and the VIIRS reference exist, compare
-  `MODIS × k` with the observed reference at region-month level. Report % error on the job. A
-  value above `DRIFT_WARN_PCT` (default 40) is a soft flag, not a block.
+- **Drift monitor:** for complete months whose `modis` is fully covered (no `modis_partial` or
+  `modis_unavailable`) and whose reference exists, compare `Σ MODIS × k` with `Σ viirs_ref` over the
+  cells in the run. Report % error on the job. A value above `DRIFT_WARN_PCT` (default 40) is a soft
+  flag, not a block. Months whose `Σ viirs_ref` is below `DRIFT_MIN_COUNT` (default 50) are reported
+  as `insufficient_data` and never flagged: small counts swing by chance. Drift is job-level, not a
+  row flag.
 
 ## 6. Incremental processing (`firms_poll`)
 
@@ -158,8 +171,10 @@ Keep these identical to the existing pipeline unless a phase brief says otherwis
 Hard gates (any failure blocks publication):
 - G1 schema and range: counts are non-negative integers; keys are unique; every affected key
   appears exactly once.
-- G2 conservation: for each sensor, the summed staged counts equal the number of detections that
-  passed the filter in the affected cell-months.
+- G2 conservation: for every affected cell-month **and** sensor family, the staged count equals an
+  independent recount of the detections that passed the filter there. Totals per family are also
+  reported. Comparing only totals would let a dropped detection in one cell cancel a duplicated
+  one in another.
 - G3 missing ≠ zero (I7): no harmonized value is computed where the needed reference or MODIS data
   is unavailable; such rows carry a null and a flag.
 - G4 frozen calibration (I6): every staged row uses the calibration version passed in.
@@ -316,6 +331,11 @@ there with a one-line comment.
   calibration version records both.
 - The frontend's other pages use mock data, and its region list does not match the backend's
   areas. Wiring them up is a separate phase after Phase 5.
+- Bootstrap mapping (Phase 4): `harmonized.parquet` stores VIIRS = 0 before 2012. In the
+  database it becomes NULL (I7: the sensor did not exist). Phase 5 decides how `/calendar`'s
+  existing `viirs_raw` field reports those months without breaking its contract (it is 0 today).
+- January 2012 counts as a full S-NPP month (S-NPP starts 2012-01-20), as in
+  `calibrate.harmonize`. This is kept for consistency with the published history.
 - **No real data is available yet.** The repo and this machine have no `harmonized.parquet`, no
   raw FIRMS archive and no boundary file. The real calibration (k), the history bootstrap, the
   static-source mask and the inter-VIIRS factor all need the FIRMS public yearly country files for
