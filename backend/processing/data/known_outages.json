@@ -1,0 +1,11 @@
+{
+  "source": "Australia exploration, table 'Data gaps' (longest zero-detection runs per satellite, type 0): origin/harmonization-modis-viirs:harmonization-modis-viirs/docs/data-exploration.md (branch head e07ecf5); listed in docs/processing/ARCHITECTURE.md section 5.",
+  "note": "Satellite-level gaps (whole days without data), inclusive dates, UTC. Families: SNPP = VIIRS S-NPP, NOAA20 = VIIRS NOAA-20. Partial-day outages are not listed; the FIRMS missing-data list was not cross-checked.",
+  "outages": [
+    {"family": "SNPP", "start": "2022-07-27", "end": "2022-08-10"},
+    {"family": "SNPP", "start": "2024-05-30", "end": "2024-06-03"},
+    {"family": "SNPP", "start": "2024-07-10", "end": "2024-07-15"},
+    {"family": "SNPP", "start": "2024-07-25", "end": "2024-07-28"},
+    {"family": "NOAA20", "start": "2023-07-19", "end": "2023-07-22"}
+  ]
+}
