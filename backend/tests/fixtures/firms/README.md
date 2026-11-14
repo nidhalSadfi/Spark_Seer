@@ -14,7 +14,7 @@ through a fake HTTP session, returning only the rows whose `acq_date` falls in t
 NRT files have no `type` column (only SP products carry it). MODIS `confidence` is 0-100, VIIRS
 `confidence` is `l`/`n`/`h`. `acq_time` is UTC `HHMM`. The dates (2026-11-12 to 2026-11-14) match
 the fake clock the tests use (2026-11-14 12:00 UTC); S-NPP rows end on 2026-11-02, its catalogue
-`coverage_end`. All coordinates fall inside the default bbox `3.5,36,10.5,37.5`.
+`coverage_end`. All coordinates fall inside the default bbox `-2.5,34,11.5,38`.
 
 Rows with the same position on different dates or times are deliberate: they are distinct
 observations (different natural keys) and must not be collapsed.

@@ -7,7 +7,6 @@ the default. This module never loads a .env file itself.
 
 from __future__ import annotations
 
-import json
 import math
 import os
 from dataclasses import dataclass, field
@@ -16,23 +15,14 @@ from pathlib import Path
 
 from firms_tool.area_api import bbox_arg, resolve_map_key
 
-AREAS_FILE = Path(__file__).resolve().parent / "data" / "areas.json"
-CELL_DEG = 0.5  # grid cell size (spec §5); the default bbox is padded outward to whole cells
-
 Bbox = tuple[float, float, float, float]  # (west, south, east, north), degrees
+
+# Spec §1: Tunisia + Algeria north of 34°N padded to 0.5° cells (one 60° FIRMS tile).
+DEFAULT_REGION_BBOX: Bbox = (-2.5, 34.0, 11.5, 38.0)
 
 
 class SettingsError(ValueError):
     """A configuration value is missing, unparseable or out of range; the message names the variable."""
-
-
-def default_bbox(areas_file: Path = AREAS_FILE) -> Bbox:
-    """Union of the area boxes in data/areas.json, padded outward to whole 0.5° cells."""
-    boxes = [a["bbox"] for a in json.loads(areas_file.read_text(encoding="utf-8"))]
-    w, s = min(b[0] for b in boxes), min(b[1] for b in boxes)
-    e, n = max(b[2] for b in boxes), max(b[3] for b in boxes)
-    return (math.floor(w / CELL_DEG) * CELL_DEG, math.floor(s / CELL_DEG) * CELL_DEG,
-            math.ceil(e / CELL_DEG) * CELL_DEG, math.ceil(n / CELL_DEG) * CELL_DEG)
 
 
 @dataclass(frozen=True)
@@ -40,7 +30,7 @@ class Settings:
     database_url: str | None = field(default=None, repr=False)  # repr=False: may hold a password
     firms_map_key: str | None = field(default=None, repr=False)
     firms_poll_interval_hours: float = 3.0
-    firms_bbox: Bbox = field(default_factory=default_bbox)
+    firms_bbox: Bbox = DEFAULT_REGION_BBOX
     firms_max_backfill_days: int = 30
     firms_raw_dir: Path = Path("data/raw/firms")
     worker_lease_seconds: float = 300.0

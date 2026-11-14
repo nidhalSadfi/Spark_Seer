@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from settings import AREAS_FILE, Settings, SettingsError, default_bbox
+from firms_tool.area_api import bbox_tiles
+from settings import DEFAULT_REGION_BBOX, Settings, SettingsError
 
 ENV_VARS = ("DATABASE_URL", "FIRMS_MAP_KEY", "FIRMS_MAP_KEY_1", "FIRMS_POLL_INTERVAL_HOURS", "FIRMS_BBOX",
             "FIRMS_MAX_BACKFILL_DAYS", "FIRMS_RAW_DIR", "WORKER_LEASE_SECONDS", "WORKER_TICK_SECONDS",
@@ -26,20 +27,22 @@ def test_defaults():
     assert (s.worker_lease_seconds, s.worker_tick_seconds, s.reconcile_day_of_month) == (300, 60, 5)
 
 
-def test_default_bbox_is_padded_union_of_areas():
-    # areas.json spans lon 3.7..10.3, lat 36.2..37.4 -> outward to whole 0.5-degree cells.
-    assert Settings.from_env().firms_bbox == (3.5, 36.0, 10.5, 37.5)
-    assert Settings().firms_bbox_arg == "3.5,36,10.5,37.5"
-    boxes = [a["bbox"] for a in json.loads(AREAS_FILE.read_text())]
-    w, s, e, n = default_bbox()
-    assert all(w <= b[0] and s <= b[1] and e >= b[2] and n >= b[3] for b in boxes)
-    assert all(v / 0.5 == int(v / 0.5) for v in (w, s, e, n))
+def test_default_bbox_is_the_whole_region():
+    # Spec §1: Tunisia + Algeria north of 34N, padded to whole 0.5-degree cells.
+    assert Settings.from_env().firms_bbox == DEFAULT_REGION_BBOX == (-2.5, 34.0, 11.5, 38.0)
+    assert Settings().firms_bbox_arg == "-2.5,34,11.5,38"
+    assert all(v / 0.5 == int(v / 0.5) for v in DEFAULT_REGION_BBOX)
 
 
-def test_default_bbox_keeps_edges_already_on_cells(tmp_path):
-    f = tmp_path / "areas.json"
-    f.write_text(json.dumps([{"bbox": [8.0, 36.5, 9.0, 37.0]}, {"bbox": [-1.2, 35.1, 2.0, 36.0]}]))
-    assert default_bbox(f) == (-1.5, 35.0, 9.0, 37.0)
+def test_default_bbox_costs_one_firms_tile():
+    assert bbox_tiles(Settings().firms_bbox_arg) == 1
+
+
+def test_default_bbox_contains_every_demo_area():
+    w, s, e, n = DEFAULT_REGION_BBOX
+    areas = json.loads((Path(__file__).resolve().parent.parent / "data" / "areas.json").read_text())
+    assert areas and all(w <= a["bbox"][0] and s <= a["bbox"][1] and e >= a["bbox"][2] and n >= a["bbox"][3]
+                         for a in areas)
 
 
 def test_env_overrides(monkeypatch):

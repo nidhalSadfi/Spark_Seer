@@ -218,7 +218,7 @@ def test_first_poll_fetches_stores_and_classifies(pg, settings, firms):
         assert path == settings.firms_raw_dir / f.source / "2026-11-14" / f"{f.id}.csv.gz"
         body = gzip.decompress(path.read_bytes())
         assert hashlib.sha256(body).hexdigest() == f.sha256
-        assert (f.window_start, f.window_days, f.bbox) == (date(2026, 11, 13), 2, "3.5,36,10.5,37.5")
+        assert (f.window_start, f.window_days, f.bbox) == (date(2026, 11, 13), 2, "-2.5,34,11.5,38")
         assert f.availability_max_date == date(2026, 11, 14)
     assert "TESTKEY123" not in str(st)  # ... but never into job records
 
