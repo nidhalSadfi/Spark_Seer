@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+
+# Raw FIRMS CSVs: ~127 MB, one file is over GitHub's 100 MB limit. Download them locally (see README).
+data/raw/
+
+# Fake data from scripts/make_fake_data.py: never commit it.
+data/fake/

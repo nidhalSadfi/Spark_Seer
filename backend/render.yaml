@@ -1,0 +1,13 @@
+# Render Blueprint (free web service). Dashboard: New > Blueprint > pick this repo. Steps in README.
+services:
+  - type: web
+    name: emberledger-api
+    runtime: python
+    plan: free
+    branch: main                 # deploys on every merge to main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health     # 503 (deploy fails) if data/harmonized.parquet is not committed
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9            # tests run on 3.11
