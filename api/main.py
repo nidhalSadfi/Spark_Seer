@@ -14,7 +14,7 @@ from api import core
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI(title="EmberLedger")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
 
 # Teammate routers (api/passport.py, api/weather.py): optional, so the app starts without them.
 try:
