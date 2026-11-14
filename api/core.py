@@ -43,9 +43,16 @@ def get_data() -> pd.DataFrame:
     return _read_parquet(data_path())
 
 
-def get_validation() -> dict:
-    """Held-out validation report written by pipeline/calibrate.py."""
-    return dict(_read_json(validation_path()))
+def get_validation(include_series: bool = False) -> dict:
+    """Held-out validation report written by pipeline/calibrate.py.
+
+    A "series" (per-month detail), if the file has one, is left out unless asked for, so that
+    /calendar's meta stays small.
+    """
+    report = dict(_read_json(validation_path()))
+    if not include_series:
+        report.pop("series", None)
+    return report
 
 
 def get_areas() -> list[dict]:

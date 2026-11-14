@@ -18,6 +18,11 @@ def areas():
     return {"areas": core.get_areas()}
 
 
+@app.get("/validation")
+def validation():
+    return core.get_validation(include_series=True)  # "series" only if the file contains one
+
+
 @app.get("/calendar")
 def calendar(bbox: str | None = None, area: str | None = None, start: int = 2001, end: int = 2025):
     if (bbox is None) == (area is None):
