@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useFilters } from '../context/FilterContext'
 import {
+  getActiveFires,
   getHotspotRecords,
   getMonthlyMatrix,
   getRegionSummaries,
@@ -37,6 +38,16 @@ export function useHotspotRecords(params) {
   return useQuery({
     queryKey: ['records', params],
     queryFn: () => getHotspotRecords(params),
+    ...opts,
+  })
+}
+
+/** Near-real-time active fires for the map (region + sensor from the global filters). */
+export function useActiveFires() {
+  const { region, sensor } = useFilters()
+  return useQuery({
+    queryKey: ['active-fires', region, sensor],
+    queryFn: () => getActiveFires({ region, sensor }),
     ...opts,
   })
 }
