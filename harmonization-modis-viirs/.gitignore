@@ -5,3 +5,5 @@ __pycache__/
 submissions.jsonl
 data/
 *.part
+.env
+.env.txt

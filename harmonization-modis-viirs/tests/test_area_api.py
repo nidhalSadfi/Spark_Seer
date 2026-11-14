@@ -1,9 +1,14 @@
+import csv
+import io
 from datetime import date
+from pathlib import Path
 
 import pytest
+import requests
 
 from firms_tool import area_api
 from firms_tool.area_api import Client, Window, plan_sensor, windows_for
+from firms_tool.cli import main
 from firms_tool.sensors import get_sensor
 
 HEADER = "latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight"
@@ -39,12 +44,27 @@ def no_sleep(monkeypatch):
 
 
 def test_resolve_map_key_prefers_suffixed_var(monkeypatch):
+    monkeypatch.setattr(area_api, "ENV_FILE", Path("no-such-env-file"))
     monkeypatch.setenv("FIRMS_MAP_KEY", "fallback")
     monkeypatch.setenv("FIRMS_MAP_KEY_1", "primary")
     assert area_api.resolve_map_key() == "primary"
     monkeypatch.delenv("FIRMS_MAP_KEY_1")
     assert area_api.resolve_map_key() == "fallback"
     assert area_api.resolve_map_key("cli") == "cli"
+
+
+def test_resolve_map_key_reads_env_file_when_unset(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# comment\nexport FIRMS_MAP_KEY_1=\"fromfile\"\nOTHER=ignored\nFIRMS_MAP_KEY=filefallback\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(area_api, "ENV_FILE", env_file)
+    monkeypatch.delenv("FIRMS_MAP_KEY_1", raising=False)
+    monkeypatch.delenv("FIRMS_MAP_KEY", raising=False)
+    assert area_api.resolve_map_key() == "fromfile"
+    monkeypatch.setenv("FIRMS_MAP_KEY_1", "already")
+    assert area_api.resolve_map_key() == "already"
 
 
 def test_windows_are_at_most_five_days():
@@ -132,6 +152,182 @@ def test_merge_unions_sp_and_nrt_headers(tmp_path):
     lines = (tmp_path / "out.csv").read_text().splitlines()
     assert lines[0] == f"{HEADER},type,source"
     assert lines[1].endswith(",0,VIIRS_NOAA20_SP") and lines[2].endswith("D,,VIIRS_NOAA20_NRT")
+
+
+def _fail(message: str) -> None:
+    """Fail without interpolating a URL or key into the message."""
+    raise AssertionError(message)
+
+
+def _isolate_map_key(monkeypatch, present: bool) -> None:
+    monkeypatch.setattr(area_api, "ENV_FILE", Path("no-such-env-file"))
+    monkeypatch.setattr(area_api, "_env_file_cache", None)
+    monkeypatch.delenv("FIRMS_MAP_KEY", raising=False)
+    if present:
+        monkeypatch.setenv("FIRMS_MAP_KEY_1", "FAKEKEY")
+    else:
+        monkeypatch.delenv("FIRMS_MAP_KEY_1", raising=False)
+
+
+def _path_after_key(url: str, marker: str) -> str:
+    prefix = f"https://firms.modaps.eosdis.nasa.gov/{marker}/"
+    if not url.startswith(prefix):
+        _fail(f"expected keyed {marker} request")
+    key, sep, tail = url[len(prefix):].partition("/")
+    if sep != "/" or key != "FAKEKEY":
+        _fail(f"keyed {marker} request did not use the fake FIRMS_MAP_KEY_1")
+    return tail
+
+
+def _install_fake_client(monkeypatch, responses):
+    _isolate_map_key(monkeypatch, present=True)
+    fake = FakeSession(responses)
+
+    def factory(map_key, session=None, log=None):
+        if map_key != "FAKEKEY":
+            _fail("query_viewport did not resolve FIRMS_MAP_KEY_1 to the fake key")
+        return Client(map_key, session=fake, log=lambda m: None)
+
+    monkeypatch.setattr(area_api, "Client", factory)
+    return fake
+
+
+AVAIL = (
+    "data_id,min_date,max_date\n"
+    "VIIRS_SNPP_SP,2012-01-20,2026-02-28\n"
+    "VIIRS_SNPP_NRT,2026-01-01,2026-11-13\n"
+)
+ROW = "1,2,3,4,5,2020-01-01,0100,N,VIIRS,n,2,6,7,D\n"
+
+
+def test_query_viewport_requests_area_with_fake_key(monkeypatch):
+    fake = _install_fake_client(monkeypatch, [
+        FakeResponse(200, AVAIL),
+        FakeResponse(200, HEADER + "\n" + ROW),
+    ])
+    text = area_api.query_viewport(
+        (0, 0, 1, 1), "viirs_snpp", date(2020, 1, 1), date(2020, 1, 1),
+    )
+    if len(fake.urls) != 2:
+        _fail(f"expected availability plus one area call, got {len(fake.urls)}")
+    if _path_after_key(fake.urls[0], "api/data_availability/csv") != "ALL":
+        _fail("availability call was not /api/data_availability/csv/<MAP_KEY>/ALL")
+    tail = _path_after_key(fake.urls[1], "api/area/csv")
+    if tail != "VIIRS_SNPP_SP/0,0,1,1/1/2020-01-01":
+        _fail("area call was not /api/area/csv/<MAP_KEY>/VIIRS_SNPP_SP/0,0,1,1/1/2020-01-01")
+    shown = Client("FAKEKEY").redact(
+        "https://firms.modaps.eosdis.nasa.gov/api/area/csv/FAKEKEY/" + tail
+    )
+    if shown != "https://firms.modaps.eosdis.nasa.gov/api/area/csv/<MAP_KEY>/" + tail:
+        _fail("redacted area URL did not keep <MAP_KEY>")
+    if "FAKEKEY" in shown or "FAKEKEY" in text:
+        _fail("viewport result or redacted URL still contains the fake key")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if len(rows) != 1 or rows[0].get("source") != "VIIRS_SNPP_SP":
+        _fail("viewport CSV did not return the area row tagged with its source")
+
+
+def test_query_viewport_splits_at_five_days(monkeypatch):
+    fake = _install_fake_client(monkeypatch, [
+        FakeResponse(200, HEADER + "\n" + ROW),
+        FakeResponse(200, HEADER + "\n" + ROW),
+    ])
+    text = area_api.query_viewport(
+        "0,0,1,1", "viirs_snpp", date(2020, 1, 1), date(2020, 1, 6), mode="sp",
+    )
+    if len(fake.urls) != 2:
+        _fail(f"expected two area calls, got {len(fake.urls)}")
+    tails = [_path_after_key(url, "api/area/csv") for url in fake.urls]
+    if tails != [
+        "VIIRS_SNPP_SP/0,0,1,1/5/2020-01-01",
+        "VIIRS_SNPP_SP/0,0,1,1/1/2020-01-06",
+    ]:
+        _fail("day range was not split into a 5-day window and a 1-day window")
+    if len(list(csv.DictReader(io.StringIO(text)))) != 2:
+        _fail("merged viewport CSV did not keep both windows")
+
+
+def test_query_viewport_requires_map_key(monkeypatch):
+    _isolate_map_key(monkeypatch, present=False)
+
+    def _no_client(*_args, **_kwargs):
+        _fail("missing key must not build a FIRMS client")
+
+    monkeypatch.setattr(area_api, "Client", _no_client)
+    with pytest.raises(area_api.ApiError, match="FIRMS_MAP_KEY_1"):
+        area_api.query_viewport((0, 0, 1, 1), "viirs_snpp", date(2020, 1, 1), date(2020, 1, 1), mode="sp")
+
+
+def test_query_viewport_rejects_world(monkeypatch):
+    _isolate_map_key(monkeypatch, present=False)
+
+    def _no_client(*_args, **_kwargs):
+        _fail("world extent must not call FIRMS")
+
+    monkeypatch.setattr(area_api, "Client", _no_client)
+    for bbox in ("world", (-180, -90, 180, 90)):
+        with pytest.raises(ValueError, match="public /data/country archive"):
+            area_api.query_viewport(bbox, "viirs_snpp", date(2020, 1, 1), date(2020, 1, 1))
+
+
+def test_status_errors_redact_key():
+    denied = Client(
+        "FAKEKEY",
+        session=FakeSession([FakeResponse(500, "bad FAKEKEY")]),
+        log=lambda m: None,
+    )
+    with pytest.raises(area_api.ApiError) as exc:
+        denied.status()
+    if "FAKEKEY" in str(exc.value) or "<MAP_KEY>" not in str(exc.value):
+        _fail("mapkey_status error text was not redacted")
+
+    class Boom:
+        def get(self, url, params=None, timeout=None):
+            raise requests.ConnectionError("failed MAP_KEY=FAKEKEY")
+
+    broken = Client("FAKEKEY", session=Boom(), log=lambda m: None)
+    with pytest.raises(area_api.ApiError) as exc2:
+        broken.status()
+    if "FAKEKEY" in str(exc2.value) or "<MAP_KEY>" not in str(exc2.value):
+        _fail("mapkey_status connection error was not redacted")
+
+
+def test_viewport_dry_run_prints_redacted_url(capsys, monkeypatch):
+    _isolate_map_key(monkeypatch, present=True)
+    main([
+        "viewport", "--sensor", "viirs_snpp", "--bbox", "0,0,1,1",
+        "--start", "2020-01-01", "--end", "2020-01-01", "--mode", "sp", "--dry-run",
+    ])
+    captured = capsys.readouterr()
+    if "FAKEKEY" in captured.out or "FAKEKEY" in captured.err:
+        _fail("viewport dry-run printed the fake key")
+    expected = (
+        "https://firms.modaps.eosdis.nasa.gov/api/area/csv/<MAP_KEY>/"
+        "VIIRS_SNPP_SP/0,0,1,1/1/2020-01-01"
+    )
+    if captured.out.strip() != expected:
+        _fail("viewport dry-run did not print the redacted /api/area URL")
+
+
+def test_viewport_help_documents_integration_key(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["viewport", "--help"])
+    if exc.value.code not in (0, None):
+        _fail("viewport --help should exit successfully")
+    text = capsys.readouterr().out
+    if "FIRMS_MAP_KEY_1" not in text or "never printed" not in text or "<MAP_KEY>" not in text:
+        _fail("viewport help does not document FIRMS_MAP_KEY_1 and redaction")
+    if "final integration" not in text.lower() and "Final integration" not in text:
+        _fail("viewport help does not name the final integration")
+
+
+def test_viewport_command_rejects_world(monkeypatch):
+    _isolate_map_key(monkeypatch, present=True)
+    with pytest.raises(SystemExit, match="public /data/country archive"):
+        main([
+            "viewport", "--sensor", "viirs_snpp", "--bbox", "world",
+            "--start", "2020-01-01", "--end", "2020-01-01", "--dry-run",
+        ])
 
 
 def test_download_resumes_and_merges(tmp_path):

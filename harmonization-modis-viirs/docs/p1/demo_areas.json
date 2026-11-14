@@ -1,6 +1,6 @@
 {
   "bbox_order": ["minLon", "minLat", "maxLon", "maxLat"],
-  "region": "Tunisia and Algeria, coastal Tell north of 34N",
+  "region": "North Africa slice of the P1 world grid: Tunisia and Algeria, coastal Tell north of 34N",
   "areas": [
     {
       "id": "bizerte",

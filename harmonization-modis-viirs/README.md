@@ -2,13 +2,14 @@
 
 A small Python CLI for collecting NASA FIRMS active-fire detections (MODIS C6.1 and
 VIIRS S-NPP / NOAA-20 / NOAA-21) for MODIS–VIIRS harmonization work. It supports
-three ways of getting data:
+four ways of getting data. `viewport` is the final integration a later map calls.
 
 | Path | Login | Area | Sensors | Best for |
 |---|---|---|---|---|
-| `archive` – public yearly per-country files | none | one country, or all countries | MODIS 2000–, S-NPP 2012–, NOAA-20 2018– (no NOAA-21) | whole countries, completed years |
+| `archive` – public yearly files | none | world zip by default, or named countries | MODIS 2000–, S-NPP 2012–, NOAA-20 2018– (no NOAA-21) | completed years, world or one country |
 | `submit` – archive download requests (`/download/create.php`) | Earthdata or email code | world, country, bbox, polygon | all four | custom areas or NOAA-21 |
-| `area-api` – `/api/area` with a free MAP_KEY | MAP_KEY | bbox or world | all four (SP, then NRT) | NOAA-21, the months since the last archive year, custom boxes |
+| `viewport` – keyed `/api/area` for one map bbox | `FIRMS_MAP_KEY_1` | one viewport | all four (SP, then NRT) | the final integration a later map calls |
+| `area-api` – `/api/area` with a free MAP_KEY | MAP_KEY | bbox or world | all four (SP, then NRT) | resumable downloads of a longer box |
 
 ## Install
 
@@ -76,11 +77,52 @@ python -m firms_tool archive --sensors modis_c61 --years 2020 --countries all   
 ```
 
 Country names follow the archive file names, for example `United_States` or
-`Cote_d_Ivoire`; see `/data/country/yearly_summary_files.txt`.
+`Cote_d_Ivoire`; see `/data/country/yearly_summary_files.txt`. With no
+`--countries`, the scope is the all-countries zip. `--global` is that same
+zip. `--countries Tunisia Algeria` limits the download to those two files.
 
-## Monthly cells for Tunisia and Algeria
+## P1: world monthly cells
 
-Public yearly files only (no MAP_KEY). `data/` is gitignored.
+P1 is a world 0.5° cell grid, one row per sensor, year, month and cell, so a
+later map can ask for a bounding box or a `cell_id`. `data/` is gitignored.
+These commands are the world path. This write-up did not run them: there is
+no world `cells.parquet` here, and no world detection count.
+
+```bash
+python -m firms_tool archive --sensors modis_c61 --years 2001-2025 --global --out data/raw
+python -m firms_tool archive --sensors viirs_snpp --years 2012-2025 --global --out data/raw
+python pipeline/ingest.py data/raw data/cells.parquet
+python pipeline/weather.py docs/p1/global_areas.json data/weather-global --dry-run
+```
+
+`--global` is the public all-countries zip at
+`/data/country/zips/<product>_<year>_all_countries.zip` (the same URL as
+`--countries all` or `--countries world`, and the same zip you get by omitting
+`--countries`). Add `--dry-run` to `archive` to print those URLs and skip the
+download. `ingest.py` reads loose CSVs and CSV members inside the zips. With
+no latitude argument, or with `none`, every latitude is kept.
+
+Filters on that grid: `type` 0, MODIS confidence at least 30, VIIRS confidence
+nominal or high. Each output row has `n` (detections) and `days` (distinct
+`acq_date`). A point falls in `[lat0, lat0+0.5)` × `[lon0, lon0+0.5)`.
+`cell_id` is the southwest corner, one decimal, sign on each side, for example
+`36.0_9.0` or `-33.5_-71.5`. `lat` / `lon` are the cell centre. Only cells
+with at least one kept detection are stored.
+
+Weather for the world stays a preview. `docs/p1/global_areas.json` is one
+Open-Meteo centre per 0.5° cell: **259,200** centres (720 × 360), from
+2001-01-01 through 2025-12-31. The command above prints `areas=259200` and
+does not call Open-Meteo. `python pipeline/weather.py --world-grid --dry-run data/weather-global`
+is the same 259,200 centres. A coarser preview is
+`python pipeline/weather.py --world-grid --step 30 --dry-run data/weather-coarser`
+(72 centres). `--fetch` would request every centre; the P1 command leaves it off.
+
+## North Africa slice
+
+The same grid, limited to Tunisia and Algeria and to latitude >= 34. The four
+demo boxes are an example region inside that slice. Counts from this run are
+in `docs/p1-ingest.md` (VIIRS 137,470, MODIS 67,230, 16,607 cells). Those
+numbers are the slice. They are not a world total.
 
 ```bash
 python -m firms_tool archive --sensors modis_c61 --years 2001-2025 --countries Tunisia Algeria --out data/raw
@@ -89,18 +131,42 @@ python pipeline/ingest.py data/raw data/cells.parquet 34
 python pipeline/weather.py data/demo_areas.json data/weather
 ```
 
-`ingest.py` keeps latitude at or north of the last argument, `type` 0, MODIS
-confidence at least 30, and VIIRS confidence nominal or high. Each output row
-is one 0.5° cell, year, month and sensor, with `n` (detections) and `days`
-(distinct `acq_date`). Demo boxes live in `data/demo_areas.json`, in order
-minLon, minLat, maxLon, maxLat: Bizerte / NW Tunisia `8.3,36.0,9.8,37.2`,
+The two ingest commands write the same path. The 16,607-row file described in
+the write-up is the output of the command that passes `34`. Demo boxes, in
+order minLon, minLat, maxLon, maxLat: Bizerte / NW Tunisia `8.3,36.0,9.8,37.2`,
 Kabylie `3.7,36.3,5.2,37.0`, NE Algeria `7.0,36.4,8.6,37.0`, Petite Kabylie
-`5.3,36.4,6.9,37.1`. Weather is the Open-Meteo historical archive at each box
-centre, one request per area.
+`5.3,36.4,6.9,37.1`. The tracked copy is `docs/p1/demo_areas.json`, and that
+path works with `weather.py` as well. Weather fetches the Open-Meteo historical
+archive at each of the four centres, one request per area, 2001-01-01 through
+2025-12-31. Any other area file with the same `areas` list is fetched the same
+way.
+
+## Map viewport (final integration)
+
+`viewport` is the call a later interactive map makes for the current view.
+It reads `FIRMS_MAP_KEY_1` from the environment or the gitignored `.env`
+(`FIRMS_MAP_KEY` is the fallback, or pass `--map-key`). The key is never
+printed. URLs shown here use `<MAP_KEY>`.
+
+```bash
+python -m firms_tool viewport --sensor viirs_snpp \
+    --bbox 8.3,36.0,9.8,37.2 --start 2024-07-01 --end 2024-07-05
+```
+
+That requests
+
+`https://firms.modaps.eosdis.nasa.gov/api/area/csv/<MAP_KEY>/<SOURCE>/<west,south,east,north>/<days>/<YYYY-MM-DD>`
+
+in windows of at most 5 days. The same entry point in code is
+`firms_tool.area_api.query_viewport(bbox, sensor, start, end)`.
+`--dry-run` prints those URLs with the key redacted and does not download.
+`world` is rejected. Bulk historical files stay on `archive`
+(`/data/country/...`).
 
 ## Area API (MAP_KEY)
 
-The key is read from `FIRMS_MAP_KEY_1`. If that is unset, the tool falls back to
+`viewport` above is the map integration. `area-api` is the resumable downloader
+for a longer box. Both read the key from `FIRMS_MAP_KEY_1`. If that is unset, the tool falls back to
 `FIRMS_MAP_KEY`, or you can pass `--map-key`. The key is never printed; URLs show it as `<MAP_KEY>`.
 
 ```bash

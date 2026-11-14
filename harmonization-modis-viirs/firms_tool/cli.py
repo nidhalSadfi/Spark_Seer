@@ -144,17 +144,23 @@ def _years(spec: str) -> list[int]:
 
 
 def cmd_archive(args) -> None:
+    if args.global_scope and args.countries:
+        sys.exit("pass either --global or --countries, not both")
     sensors = [get_sensor(k) for k in args.sensors]
     if args.config:
         cfg = load_config(args.config)
         sensors = sensors or cfg.sensors
         years = list(range(cfg.start.year, cfg.end.year + 1))
-        countries = args.countries or [cfg.area.archive_country or ("all" if cfg.area.type != "country" else None)]
-        if None in countries:
-            sys.exit("set area.archive_country (archive file name, e.g. United_States) or pass --countries")
+        if args.global_scope:
+            countries = ["all"]
+        else:
+            countries = args.countries or [cfg.area.archive_country or ("all" if cfg.area.type != "country" else None)]
+            if None in countries:
+                sys.exit("set area.archive_country (archive file name, e.g. United_States) or pass --countries")
     else:
         years = _years(args.years)
-        countries = args.countries or ["all"]
+        # P1 scope: no --countries means the all-countries zip. --global is that same zip.
+        countries = ["all"] if args.global_scope or not args.countries else list(args.countries)
     index = public.archive_index()
     s = portal.new_session()
     for sensor in sensors:
@@ -174,7 +180,8 @@ def cmd_archive(args) -> None:
                     print(f"downloaded {portal.download(s, url, Path(args.out) / sensor.key)}")
 
 
-NO_KEY = ("no MAP_KEY: set FIRMS_MAP_KEY_1 (or FIRMS_MAP_KEY) or pass --map-key "
+NO_KEY = ("no MAP_KEY: set FIRMS_MAP_KEY_1 (or FIRMS_MAP_KEY) in the environment "
+          "or in the project .env, or pass --map-key "
           "(free: https://firms.modaps.eosdis.nasa.gov/api/map_key/)")
 
 
@@ -192,6 +199,35 @@ def cmd_mapkey_status(args) -> None:
 def cmd_availability(args) -> None:
     for source, (lo, hi) in sorted(_client_or_exit(args).availability().items()):
         print(f"{source:18} {lo} .. {hi}")
+
+
+def cmd_viewport(args) -> None:
+    """Map integration: one bbox, one sensor, a day range, keyed /api/area."""
+    bbox = area_api.parse_viewport_bbox(args.bbox)
+    start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
+    if not area_api.resolve_map_key(args.map_key):
+        sys.exit(NO_KEY)
+    if args.dry_run:
+        sensor = get_sensor(args.sensor)
+        plan_mode = "sp" if args.mode == "auto" else args.mode
+        windows = area_api.plan_sensor(sensor, start, end, plan_mode, None)
+        if not windows:
+            sys.exit(f"no {sensor.key} coverage for {start.isoformat()}..{end.isoformat()}")
+        if args.mode == "auto":
+            print(
+                "dry-run: SP windows only (a live query checks data_availability, then NRT after SP ends)",
+                file=sys.stderr,
+            )
+        bbox_s = area_api.bbox_arg(bbox)
+        for w in windows:
+            print(area_api.Client("<MAP_KEY>").area_url(w, bbox_s))
+        return
+    text = area_api.query_viewport(
+        bbox, args.sensor, start, end, mode=args.mode, map_key=args.map_key,
+    )
+    sys.stdout.write(text)
+    if text and not text.endswith("\n"):
+        sys.stdout.write("\n")
 
 
 def cmd_area_api(args) -> None:
@@ -253,7 +289,15 @@ def cmd_compare_archive(args) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="firms", description="NASA FIRMS archive download helper")
+    p = argparse.ArgumentParser(
+        prog="firms",
+        description=(
+            "NASA FIRMS archive download helper. "
+            "The final map integration is viewport: keyed /api/area for one bbox. "
+            "It reads FIRMS_MAP_KEY_1 from the environment or the gitignored .env. "
+            "The key is never printed; URLs use <MAP_KEY>."
+        ),
+    )
     p.add_argument("--session", type=Path, default=DEFAULT_SESSION, help="saved session cookie file")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -291,16 +335,29 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true")
     sp.set_defaults(func=cmd_download)
 
-    sp = sub.add_parser("archive", help="download public yearly per-country files (no login)")
+    sp = sub.add_parser(
+        "archive",
+        help="download public yearly files (default: the all-countries world zip; no login)",
+    )
     sp.add_argument("--config")
     sp.add_argument("--sensors", nargs="*", default=[], choices=list(SENSORS))
     sp.add_argument("--years", default=str(date.today().year - 1), help="e.g. 2019-2023 or 2019,2021")
-    sp.add_argument("--countries", nargs="*", help="archive names, e.g. Australia United_States, or 'all'")
+    sp.add_argument(
+        "--global",
+        dest="global_scope",
+        action="store_true",
+        help="world scope: the all-countries yearly zip (also the default when --countries is omitted)",
+    )
+    sp.add_argument(
+        "--countries",
+        nargs="*",
+        help="limit to these archive file names, e.g. Tunisia Algeria; omit for the world zip",
+    )
     sp.add_argument("--out", default="data/archive")
-    sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--dry-run", action="store_true", help="print URLs and do not download")
     sp.set_defaults(func=cmd_archive)
 
-    key_help = "MAP_KEY (default: $FIRMS_MAP_KEY_1, then $FIRMS_MAP_KEY)"
+    key_help = "MAP_KEY (default: $FIRMS_MAP_KEY_1, then $FIRMS_MAP_KEY, then the project .env)"
 
     sp = sub.add_parser("mapkey-status", help="show MAP_KEY transaction usage")
     sp.add_argument("--map-key", help=key_help)
@@ -309,6 +366,29 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("availability", help="show SP/NRT date ranges per source")
     sp.add_argument("--map-key", help=key_help)
     sp.set_defaults(func=cmd_availability)
+
+    sp = sub.add_parser(
+        "viewport",
+        help="final map integration: keyed /api/area for one bbox (FIRMS_MAP_KEY_1, key never printed)",
+        description=(
+            "Final integration for a later interactive map. "
+            "Requests FIRMS /api/area for one viewport (west,south,east,north), one sensor, "
+            "and a day range. The MAP_KEY is FIRMS_MAP_KEY_1 from the environment or the "
+            "gitignored project .env (then FIRMS_MAP_KEY). The key is never printed; "
+            "URLs use <MAP_KEY>. Bulk historical files stay on the public /data/country archive. "
+            "This command does not accept world."
+        ),
+    )
+    sp.add_argument("--sensor", required=True, choices=list(SENSORS))
+    sp.add_argument("--bbox", required=True, help="west,south,east,north (a map viewport, not world)")
+    sp.add_argument("--start", required=True, help="YYYY-MM-DD")
+    sp.add_argument("--end", required=True, help="YYYY-MM-DD")
+    sp.add_argument("--mode", choices=["auto", "sp", "nrt"], default="auto",
+                    help="auto = SP through the last availability date, then NRT")
+    sp.add_argument("--map-key", help=key_help)
+    sp.add_argument("--dry-run", action="store_true",
+                    help="print redacted /api/area URLs and do not download")
+    sp.set_defaults(func=cmd_viewport)
 
     sp = sub.add_parser("area-api", help="fetch a bbox via the area API (5-day windows, resumable)")
     sp.add_argument("--config")

@@ -1,0 +1,11 @@
+{
+  "bbox_order": ["minLon", "minLat", "maxLon", "maxLat"],
+  "region": "P1 weather preview: one Open-Meteo centre per 0.5 degree cell on the world fire grid. Longitude runs from -180 to 180 and latitude from -90 to 90 (259200 centres). The P1 command is a dry run, 2001-01-01 through 2025-12-31, and does not call Open-Meteo. --step selects a coarser grid. --fetch would call Open-Meteo and is outside the P1 run.",
+  "grid": {
+    "step_deg": 0.5,
+    "west": -180,
+    "south": -90,
+    "east": 180,
+    "north": 90
+  }
+}
