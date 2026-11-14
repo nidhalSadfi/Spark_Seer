@@ -1,0 +1,39 @@
+---
+description: Publish MODIS/VIIRS harmonization only to origin branch harmonization-modis-viirs as hamagama
+alwaysApply: true
+---
+
+# Publish harmonization-modis-viirs
+
+Repo `C:\Users\moham\Spark_Seer`. Remote `origin`: `https://github.com/nidhalSadfi/Spark_Seer.git`.
+
+Only publish branch: `harmonization-modis-viirs`. Project files live under `harmonization-modis-viirs/` (FIRMS tool, pipeline, tests, docs, EmberGuard, demo-area boxes, exploration figures).
+
+```
+# good, on harmonization-modis-viirs, with the auth header below
+git push origin HEAD:harmonization-modis-viirs
+
+# bad
+git push origin main
+git push --force
+```
+
+## Account
+
+Push as **hamagama**. **Medfathallah** gets 403 Permission denied on this repo. `gh` is often not on PATH. WinGet binary: `%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe`. If that `gh` user is not hamagama, run `gh auth switch` to hamagama.
+
+Git Credential Manager is stored as Medfathallah, so a plain `git push` sends the wrong account. Clear the helper for one command and pass a bearer header. Never print, log, or store the token.
+
+```
+git -c credential.helper= -c http.extraheader="AUTHORIZATION: bearer $(gh auth token)" push origin HEAD:harmonization-modis-viirs
+```
+
+On this branch, `git push -u origin harmonization-modis-viirs` is the other allowed shape, with the same one-shot auth. Do not `git push origin main`.
+
+## Never
+
+- Force-push `main` or any branch. Do not update git config. Do not skip hooks. Do not amend or rebase unless the user explicitly asks.
+- Change `main`. `origin/main` `be943d3f711187c5be0a89edad29d0af529a5dae` is a revert whose tree matches `75d2686` (README only). `bda51c715b44a4355fac48105ab254205e214468` remains in main history, followed by that revert.
+- Commit secrets (`.env`, credentials, keys, tokens), generated daily weather dumps such as `docs/p1/*.json` (`docs/p1/demo_areas.json` is already tracked), `notes.md`, `preferences.md`, `C:\Users\moham\Downloads\DL_FIRE_LS_847802.zip`, `node_modules`, or generated data ignored by `harmonization-modis-viirs/.gitignore` (`data/`, `__pycache__/`, `.venv/`, `.firms_session.json`, `submissions.jsonl`, `*.part`).
+- Commit the source store `C:\Users\moham\AppData\Local\Cursor\AgentStores\cursor_agent_stores\bc-89a77ffe-68ca-4a42-a254-2907a81168a7\files`.
+- Invent Australia analysis. Names `cursor/australia-eda-ede9` and `cursor/p1-monthly-cells-2a9d` were not on this machine.
