@@ -49,6 +49,8 @@ Invariants. Each one must have at least one automated test that fails if it brea
 - **I1 Read-only API.** The API process never imports `worker`, `crewai` or the LLM client, and
   no GET endpoint writes to job tables or calls FIRMS/OpenRouter. The only write endpoint for
   processing is an admin-token-protected manual trigger, which the dashboard does not call.
+  The community-report endpoints (§10) write only to `community_reports`, never to processing or
+  approved tables (amendment 2026-11-15).
 - **I2 Approved data is never overwritten by a failed run.** Results go to staging; promotion is
   one transaction; any failure or rejection leaves the approved tables byte-identical.
 - **I3 No new or modified rows → no CrewAI.** The diff runs before `crewai` is imported; such a job
@@ -332,14 +334,43 @@ Bootstrap: approved dataset version 1 and calibration version 1 are loaded from 
   - `/processing/datasets`: version history.
   - `POST /processing/jobs`: admin token required (`ADMIN_TOKEN`); queues a manual run. It still
     obeys I4.
+- **Live fires and community reports (amendment 2026-11-15).** The fire map and the reports page
+  move off mock and browser-local data:
+  - `GET /fires/live?hours=48&bbox=minLon,minLat,maxLon,maxLat&source=`: NRT detections from
+    `raw_detections` whose acquisition time (UTC, from `acq_date` + `acq_time`) is within `hours`
+    (1-168, default 48) of the newest stored detection, so the map is never empty just because
+    FIRMS is a few hours behind. Response:
+    `{"snapshot": ISO, "window": {"start": ISO, "end": ISO}, "detections": [{"id", "lat", "lon",
+    "acq_time": ISO, "source", "satellite", "sensor": "modis"|"viirs", "confidence", "frp",
+    "daynight"}], "sources": [{"source", "max_acq_date"}], "meta": {"count", "product": "NRT",
+    "hours", "bbox"}}`. 400 for a bad bbox or hours, 503 when the database is unreachable.
+    Detections are read-only data; the endpoint never calls FIRMS.
+  - `GET /reports` → `{"reports": [report]}`, newest first, at most 500.
+  - `POST /reports` with `{"lat", "lon", "observed": "smoke"|"flames"|"both"|"unsure",
+    "note"}` (note trimmed, at most 280 characters; lat/lon validated) → 201 and the report.
+  - `PATCH /reports/{id}` with `{"status": "pending"|"confirmed"|"false"}` → the report;
+    `reviewedAt` is set for confirmed/false and cleared for pending. `DELETE /reports/{id}` → 204.
+  - `report = {"id", "lat", "lon", "observed", "note", "status", "createdAt": ISO,
+    "reviewedAt": ISO|null}`; ids are server-generated.
+  - PATCH and DELETE require the `X-Admin-Token` header when `REPORTS_ADMIN_TOKEN` is set; when it
+    is unset (local development) they are open. POST is always open, with the validation above.
+  - New Alembic migration for `community_reports`. These endpoints never touch processing tables.
+- Database access in the API: when `DATABASE_URL` is unset or unreachable, the existing endpoints
+  keep working from the parquet file (Render demo), and `/processing/*`, `/fires/live` and
+  `/reports` answer 503 with a clear message.
 
 ## 11. Frontend
 
 `/dashboard/processing` (new sidebar entry): status header, job list, and a job detail drawer
 (steps timeline, counts, verdict, LLM attempts and fallbacks, gate results). Data comes from the
 `/processing/*` GETs via React Query (`refetchInterval` 30 s while visible). There is no "run"
-button by default. The other dashboard pages are not changed in these phases; they still use mock
-data.
+button by default.
+
+Amendment 2026-11-15: the fire map (`getActiveFires`) reads `GET /fires/live` and clusters the
+detections client-side into the existing feed shape; it falls back to the mock feed only when the
+API is unreachable, and says so (as `getCalendar` does). The reports store reads and writes
+`/reports`, falling back to browser-local storage with a visible notice when the API is
+unreachable.
 
 ## 12. Configuration
 
