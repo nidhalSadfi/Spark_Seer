@@ -16,13 +16,17 @@ function Ghost({ children }) {
 }
 
 export function ChallengeCard() {
-  const { event, title, summary, url } = PROJECT.challenge
+  const { event, title, summary, url, logo } = PROJECT.challenge
   return (
     <TiltCard max={5} className="h-full">
       <div className="flex items-center gap-3">
-        <span className="grid size-10 place-items-center rounded-xl bg-fire/15 text-fire">
-          <Trophy className="size-5" aria-hidden />
-        </span>
+        {logo ? (
+          <img src={logo} alt={`${title || 'Challenge'} logo`} className="h-12 w-auto max-w-[8.5rem] rounded-xl bg-white/5 object-contain p-1.5" />
+        ) : (
+          <span className="grid size-10 place-items-center rounded-xl bg-fire/15 text-fire">
+            <Trophy className="size-5" aria-hidden />
+          </span>
+        )}
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fire">The challenge</p>
           <p className="text-sm text-muted">{event}</p>
@@ -41,7 +45,7 @@ export function ChallengeCard() {
   )
 }
 
-function Member({ member, index }) {
+function Member({ member, index, perRow }) {
   const filled = Boolean(member.name)
   return (
     <motion.li
@@ -50,7 +54,8 @@ function Member({ member, index }) {
       viewport={{ once: true, margin: '0px 0px -40px 0px' }}
       transition={{ duration: 0.4, delay: index * 0.07 }}
       whileHover={{ y: -6 }}
-      className={`group relative rounded-2xl border p-5 text-center transition-colors ${
+      style={{ '--w': `calc((100% - ${(perRow - 1) * 1}rem) / ${perRow})` }}
+      className={`group relative w-full rounded-2xl border p-5 text-center transition-colors sm:w-[calc(50%-0.5rem)] lg:w-[var(--w)] ${
         filled ? 'border-line bg-card/70 hover:border-fire/40' : 'border-dashed border-line/80 bg-card/20 hover:border-fire/30'
       }`}
     >
@@ -84,19 +89,31 @@ function Member({ member, index }) {
 }
 
 export function TeamSection() {
-  const { name, tagline, members } = PROJECT.team
+  const { name, tagline, members, logo, url } = PROJECT.team
+  const perRow = members.length > 4 ? 3 : 4 // 6 people -> 3 x 2
   return (
     <div>
       <div className="text-center">
         <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-fire">
           <span className="mr-2 text-faint">//</span>The team
         </p>
-        <h3 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{name || <Ghost>Team name</Ghost>}</h3>
+        {logo && (
+          <img src={logo} alt={`${name || 'Team'} logo`} className="mx-auto mt-4 size-24 rounded-2xl border border-line bg-white/5 object-contain p-2" />
+        )}
+        <h3 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+          {url && name ? (
+            <a href={url} target="_blank" rel="noreferrer" className="hover:text-orange-200">
+              {name}
+            </a>
+          ) : (
+            name || <Ghost>Team name</Ghost>
+          )}
+        </h3>
         <p className="mx-auto mt-2 max-w-xl text-muted">{tagline || <Ghost>Your team tagline</Ghost>}</p>
       </div>
-      <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="mt-10 flex flex-wrap justify-center gap-4">
         {members.map((m, i) => (
-          <Member key={i} member={m} index={i} />
+          <Member key={i} member={m} index={i} perRow={perRow} />
         ))}
       </ul>
     </div>

@@ -41,7 +41,7 @@ export const SCENES = [
     Figure: Riffle,
     heading: 'Walk the calendar',
     body: 'The fire activity calendar turns years of detections into a pattern you can read at a glance.',
-    hint: 'Hover a card, or focus the tray and use ← → to walk it.',
+    hint: 'Hover a card, or Tab to the tray and use ← → to walk it (Esc to leave).',
   },
 ]
 
@@ -115,7 +115,7 @@ export default function FigureShowcase({ scene, onScene }) {
         </div>
       </div>
 
-      <div className="relative">
+      <div className="relative" onMouseDownCapture={(e) => e.preventDefault() /* clicks must not focus a figure and lock the key shortcuts */}>
         <div
           className="relative overflow-hidden rounded-3xl border border-line p-3 shadow-[0_0_80px_-30px_rgba(249,115,22,0.5)]"
           style={{ ...STAGE_THEME, background: '#0c1423' }}
