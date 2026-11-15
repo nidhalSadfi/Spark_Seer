@@ -1,12 +1,13 @@
 import { Link, NavLink } from 'react-router-dom'
 import { motion } from 'motion/react'
-import { CalendarDays, ChartLine, Database, Flame, LayoutDashboard, Map, Siren, Workflow } from 'lucide-react'
+import { CalendarDays, ChartLine, Database, Flame, LayoutDashboard, Map, Radio, Siren, Workflow } from 'lucide-react'
 import { useReports } from '../../hooks/useReports'
 
 export const NAV_ITEMS = [
   { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/dashboard/map', label: 'Global Fire Map', icon: Map },
   { to: '/dashboard/reports', label: 'Fire Reports', icon: Siren, badge: 'pending' },
+  { to: '/dashboard/social', label: 'Social Alerts', icon: Radio },
   { to: '/dashboard/calendar', label: 'Activity Calendar', icon: CalendarDays },
   { to: '/dashboard/analytics', label: 'Analytics', icon: ChartLine },
   { to: '/dashboard/explorer', label: 'Data Explorer', icon: Database },

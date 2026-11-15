@@ -8,6 +8,7 @@ const Landing = lazy(() => import('./pages/Landing'))
 const Overview = lazy(() => import('./pages/Overview'))
 const FireMapPage = lazy(() => import('./pages/FireMapPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const SocialAlertsPage = lazy(() => import('./pages/SocialAlertsPage'))
 const CalendarPage = lazy(() => import('./pages/CalendarPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const DataExplorer = lazy(() => import('./pages/DataExplorer'))
@@ -22,6 +23,7 @@ export default function App() {
           <Route index element={<Overview />} />
           <Route path="map" element={<FireMapPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="social" element={<SocialAlertsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="explorer" element={<DataExplorer />} />

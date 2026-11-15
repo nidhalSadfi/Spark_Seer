@@ -9,18 +9,21 @@ import { CORROBORATION_KM } from '../../utils/reports'
  * Small map centred on one report, so a reviewer can judge the place: the report's marker, the
  * radius searched for satellite hotspots, and those hotspots as glow (when a feed is passed in).
  * Mount it with `key={report.id}` so each report gets a fresh map.
+ *
+ * `radiusKm` / `label` change the dashed circle (the Social Alerts page draws a ticket's own
+ * location precision instead of the 10 km search radius).
  */
-export default function ReportMiniMap({ report, feed, height = 240 }) {
+export default function ReportMiniMap({ report, feed, height = 240, radiusKm = CORROBORATION_KM, label }) {
   const { lat, lon, status } = report
   const elRef = useRef(null)
   const glowRef = useRef(null)
 
   useEffect(() => {
     const map = createBaseMap(elRef.current, { interactive: false })
-    // frame the search radius (a square of side 2 x radius around the point)
-    map.fitBounds(L.latLng(lat, lon).toBounds(CORROBORATION_KM * 2000), { padding: [6, 6], animate: false })
+    // frame the circle (a square of side 2 x radius around the point)
+    map.fitBounds(L.latLng(lat, lon).toBounds(radiusKm * 2000), { padding: [6, 6], animate: false })
     L.circle([lat, lon], {
-      radius: CORROBORATION_KM * 1000,
+      radius: radiusKm * 1000,
       color: '#38bdf8',
       weight: 1.5,
       dashArray: '5 5',
@@ -37,19 +40,19 @@ export default function ReportMiniMap({ report, feed, height = 240 }) {
       glowRef.current = null
       map.remove()
     }
-  }, [lat, lon, status])
+  }, [lat, lon, status, radiusKm])
 
   // declared after the map effect, so it runs after the map (and its glow layer) is rebuilt
   useEffect(() => {
     if (!glowRef.current || !feed) return
     glowRef.current.setData(feed.detections, feed.window.end, feed.window.end - feed.window.start)
-  }, [feed, lat, lon, status])
+  }, [feed, lat, lon, status, radiusKm])
 
   return (
     <div className="sg-map relative isolate overflow-hidden rounded-xl border border-line bg-bg" style={{ height }}>
       <div ref={elRef} className="absolute inset-0 z-0" />
       <p className="pointer-events-none absolute bottom-2 left-2 z-10 rounded-md bg-[#0d1524]/85 px-2 py-1 text-[10.5px] text-muted backdrop-blur-md">
-        Dashed circle: {CORROBORATION_KM} km search radius
+        {label ?? `Dashed circle: ${radiusKm} km search radius`}
       </p>
     </div>
   )

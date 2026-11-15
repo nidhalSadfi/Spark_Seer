@@ -35,9 +35,29 @@ Anyone can flag a fire the satellites have not seen, and someone else can confir
    and the weather and location info for its coordinates are fetched: `GET /weather?lat=&lon=` (3-day Open-Meteo outlook, the named
    area it falls in, typical satellite activity for the month). False alarms disappear from the map.
 
-Reports are stored **in this browser only** (`localStorage`, see `src/services/reportsStore.js`): they are not shared between users or
-devices, because the API has no reports endpoint yet. All reads and writes go through that one file, so moving to an API later means
-changing only it. The satellite check uses the map's feed, which is still sample data.
+Reports are shared through the API's `/reports` endpoint when it is reachable. When it is not (server down, no database, or an API
+without the endpoint) they fall back to this browser's `localStorage` and the pages say so: those reports are not shared between
+users or devices. All reads and writes go through `src/services/reportsStore.js`. The satellite check uses the map's feed.
+
+## Social Alerts
+`/dashboard/social` (sidebar: *Social Alerts*) lists the fires that the **incident agents** find in public posts and news
+(Bluesky, X, GDELT news, Kanari signals), merged into one ticket per incident and checked against satellite detections
+(*Satellite overlap*, *No satellite support* or *Mentioned*). A ticket shows its place and precision, a map, the satellite check,
+the lead time between the first post and the first satellite detection, the 25-year history of its 0.5° cell, and every public
+mention with its original link.
+
+- **Report an alert.** *Report as fire alert* files the ticket as an unverified community report at its coordinates, with the
+  ticket number, the number of mentions and the first link in the note. It then shows as a **?** on the map and goes through the
+  usual review in *Fire Reports*. The page remembers which tickets were reported (from the note), so none is filed twice.
+  *Report all … not yet reported* does the same for the tickets in the current filter, at most 25 per click.
+- **Tickets are unverified public mentions**, not official alerts. When a ticket's location is only known to a wide area, the page
+  says the **?** marks the centre of that area. Links from the feeds are shown only if they are `http(s)`.
+- **The agents are a separate local service** (they hold the social-media keys and make paid calls), read here with GET only. Start
+  them with `cd backend/harmonization-modis-viirs && python -m incident_agents serve` (see its README); the page expects them at
+  `VITE_INCIDENTS_URL` (default `http://127.0.0.1:8765`) and shows how to start them when they do not answer. They allow the
+  dashboard's origin (`localhost:5173` and `:4173`); for another one set `INCIDENT_CORS_ORIGINS` for them.
+
+Mapping and report text: `src/utils/incidents.js`; client: `src/services/incidentsApi.js`.
 
 ## Landing page
 `/` is an interactive landing page (Hairline figures, ember particles, keyboard controls); the dashboard lives under `/dashboard`.
@@ -83,5 +103,5 @@ processing database is not connected; there is no mock data. Mapping: `src/utils
 
 ## Dev checks
 Plain Node scripts for the pure mapping functions (no test runner): `node dev-checks/live-data.check.mjs` (live fires,
-reports) and `node dev-checks/processing-calendar.check.mjs` (job-detail mapping, calendar coverage, stats skipping
-"none" months).
+reports), `node dev-checks/processing-calendar.check.mjs` (job-detail mapping, calendar coverage, stats skipping
+"none" months) and `node dev-checks/incidents.check.mjs` (Social Alerts tickets, link safety, report text).
