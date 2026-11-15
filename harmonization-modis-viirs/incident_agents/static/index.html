@@ -46,7 +46,10 @@
   .ticket.replay { border-style:dashed; }
   .extra { font-size:12px; margin-top:4px; }
   .extra b { font-weight:600; }
-  details summary { cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
+  .period { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .period .plabel { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .period label { display:flex; gap:5px; align-items:center; cursor:pointer; }
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
@@ -59,24 +62,29 @@
     <section>
       <h2>Search</h2>
       <textarea id="q" placeholder="e.g. France, or: forest fires in Kabylie and Tizi Ouzou, or: Var and Bouches-du-Rhône">France</textarea>
-      <div class="row">
-        <label>Last <select id="hours"><option>6</option><option>12</option><option selected>24</option><option>48</option><option>72</option></select> h</label>
-        <button id="run">Run now</button>
+      <div class="period" role="radiogroup" aria-label="Period">
+        <span class="plabel">Period</span>
+        <label><input type="radio" name="period" value="recent" checked> Recent hours</label>
+        <label><input type="radio" name="period" value="past"> Past dates</label>
       </div>
-      <div class="row">
+      <div id="recent">
+        <div class="row">
+          <label>Last <select id="hours"><option>6</option><option>12</option><option selected>24</option><option>48</option><option>72</option></select> hours</label>
+        </div>
+      </div>
+      <div id="past" hidden>
+        <div class="row">
+          <label>From <input id="rfrom" type="date" min="2026-08-03" value="2026-08-26"></label>
+          <label>To <input id="rto" type="date" min="2026-08-03" value="2026-08-29"></label>
+        </div>
+        <p class="note">Any dates from 3 Aug 2026 (start of Kanari's fire archive) to yesterday, up to 31 days. The run starts from the fires the satellites saw in those dates and searches posts around each one. These tickets get a Replay badge and never mix with live ones.</p>
+      </div>
+      <div class="row"><button id="run">Run now</button></div>
+      <div class="row" id="schedrow">
         <label>Every <input id="every" type="number" min="15" value="60" style="width:70px"> min</label>
         <button class="ghost" id="sched">Schedule</button>
       </div>
       <div id="schedules"></div>
-      <details>
-        <summary>Replay a past window</summary>
-        <div class="row">
-          <label>From <input id="rfrom" type="date" min="2026-08-03"></label>
-          <label>To <input id="rto" type="date" min="2026-08-03"></label>
-          <button class="ghost" id="replay">Replay</button>
-        </div>
-        <p class="note">Rebuilds what the agents would have found, starting from fires in Kanari's archive (from 3 Aug 2026). Replay tickets are marked and never mix with live ones.</p>
-      </details>
       <p class="note">Satellite data and verified signals: Source: <a href="https://kanari.io" target="_blank" rel="noopener">kanari.io</a> (CC BY 4.0), NASA FIRMS.</p>
     </section>
     <section style="margin-top:16px">
@@ -102,7 +110,7 @@ function addEvent(e) {
   d.innerHTML = `<span class="t">${esc((e.ts||"").slice(11,19))}</span><span class="s-${esc(e.status)}">${esc(tag)} · ${esc(e.status)}</span><span>${e.run_id ? "#"+esc(e.run_id)+" " : ""}${esc(e.message)}</span>`;
   const box = $("steps"); box.appendChild(d); box.scrollTop = box.scrollHeight;
   if (["ticket","satellite","history","lead"].includes(e.step) || (e.step === "run" && ["done","error"].includes(e.status))) loadTickets();
-  if (e.step === "run" && ["done","error"].includes(e.status)) { $("run").disabled = false; $("replay").disabled = false; }
+  if (e.step === "run" && ["done","error"].includes(e.status)) { $("run").disabled = false; }
 }
 
 function listen(after) {
@@ -153,16 +161,26 @@ async function loadSchedules() {
   $("schedules").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { await fetch(`/api/schedules/${b.dataset.del}`, {method:"DELETE"}); loadSchedules(); });
 }
 
+const period = () => document.querySelector('input[name="period"]:checked').value;
+function showPeriod() {
+  const past = period() === "past";
+  $("recent").hidden = past; $("past").hidden = !past; $("schedrow").hidden = past;
+  $("run").textContent = past ? "Run on these dates" : "Run now";
+}
+document.querySelectorAll('input[name="period"]').forEach(r => r.onchange = showPeriod);
+const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+$("rfrom").max = yesterday; $("rto").max = yesterday;
+
 $("run").onclick = async () => {
+  let body = {query: $("q").value, hours: +$("hours").value};
+  if (period() === "past") {
+    if (!$("rfrom").value || !$("rto").value) { alert("Pick both dates"); return; }
+    if ($("rfrom").value > $("rto").value) { alert("'From' must be on or before 'To'"); return; }
+    body = {query: $("q").value, replay_from: $("rfrom").value, replay_to: $("rto").value};
+  }
   $("run").disabled = true;
-  const r = await fetch("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, hours:+$("hours").value})});
-  if (!r.ok) { $("run").disabled = false; alert((await r.json()).detail || "could not start"); }
-};
-$("replay").onclick = async () => {
-  if (!$("rfrom").value || !$("rto").value) { alert("Pick both dates"); return; }
-  $("run").disabled = true; $("replay").disabled = true;
-  const r = await fetch("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, replay_from:$("rfrom").value, replay_to:$("rto").value})});
-  if (!r.ok) { $("run").disabled = false; $("replay").disabled = false; alert(JSON.stringify((await r.json()).detail) || "could not start"); }
+  const r = await fetch("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  if (!r.ok) { $("run").disabled = false; const d = (await r.json()).detail; alert(typeof d === "string" ? d : JSON.stringify(d)); }
 };
 $("sched").onclick = async () => {
   await fetch("/api/schedules", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, hours:+$("hours").value, interval_min:+$("every").value})});

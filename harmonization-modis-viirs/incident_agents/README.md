@@ -61,7 +61,7 @@ Without the file, tickets simply carry no history. If you add more countries, se
 
 ## Replay a past window
 
-`replay` (or "Replay a past window" on the page) rebuilds what the agents would have found on past dates. Kanari's archive starts on **3 Aug 2026**, so earlier dates are refused. A replay covers at most 31 days.
+`replay` (or **Period → Past dates** on the page) rebuilds what the agents would have found on past dates. Kanari's archive starts on **3 Aug 2026**, so earlier dates are refused. A replay covers at most 31 days.
 
 A broad keyword search over a past window only reaches its last few hours: sources return newest first, and our page caps stop there. So a replay is **fire-seeded**:
 
