@@ -13,6 +13,8 @@ export const getHealth = () => apiGet('/health')
 export const getAreas = async () => (await apiGet('/areas')).areas
 export const getValidation = () => apiGet('/validation')
 export const getWeather = (area) => apiGet('/weather', { area })
+/** Same 3-day weather context for any point (used for confirmed community fire reports). */
+export const getPointWeather = (lat, lon) => apiGet('/weather', { lat, lon })
 
 /** Evidence Passport for one area (or bbox) and month. `month` is 1-12. */
 export const investigate = ({ area, bbox, year, month }) =>

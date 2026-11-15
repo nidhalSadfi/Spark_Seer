@@ -1,3 +1,12 @@
+/** Great-circle distance in km between two points (degrees). */
+export function haversineKm(lat1, lon1, lat2, lon2) {
+  const rad = Math.PI / 180
+  const dLat = (lat2 - lat1) * rad
+  const dLon = (lon2 - lon1) * rad
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2
+  return 12742 * Math.asin(Math.min(1, Math.sqrt(a)))
+}
+
 /** Bounding box [minLon, minLat, maxLon, maxLat] of a GeoJSON Feature/Geometry, or null. */
 export function bboxOf(geo) {
   let minLon = Infinity

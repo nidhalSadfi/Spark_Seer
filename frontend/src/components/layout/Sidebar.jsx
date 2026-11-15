@@ -1,10 +1,12 @@
 import { Link, NavLink } from 'react-router-dom'
 import { motion } from 'motion/react'
-import { CalendarDays, ChartLine, Database, Flame, LayoutDashboard, Map } from 'lucide-react'
+import { CalendarDays, ChartLine, Database, Flame, LayoutDashboard, Map, Siren } from 'lucide-react'
+import { useReports } from '../../hooks/useReports'
 
 export const NAV_ITEMS = [
   { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/dashboard/map', label: 'Global Fire Map', icon: Map },
+  { to: '/dashboard/reports', label: 'Fire Reports', icon: Siren, badge: 'pending' },
   { to: '/dashboard/calendar', label: 'Activity Calendar', icon: CalendarDays },
   { to: '/dashboard/analytics', label: 'Analytics', icon: ChartLine },
   { to: '/dashboard/explorer', label: 'Data Explorer', icon: Database },
@@ -37,6 +39,7 @@ export function Brand() {
 }
 
 export default function Sidebar({ onNavigate }) {
+  const { counts } = useReports()
   return (
     <div className="flex h-full flex-col gap-6 bg-sidebar p-4">
       <Link to="/" onClick={onNavigate} aria-label="Spark Seer landing page" className="rounded-lg">
@@ -44,7 +47,7 @@ export default function Sidebar({ onNavigate }) {
       </Link>
       <nav aria-label="Main" className="flex flex-col gap-1">
         <p className="mb-1 px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-faint">Navigation</p>
-        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+        {NAV_ITEMS.map(({ to, label, icon: Icon, end, badge }) => (
           <NavLink
             key={to}
             to={to}
@@ -69,6 +72,14 @@ export default function Sidebar({ onNavigate }) {
                 )}
                 <Icon className="relative size-[18px] transition-transform duration-200 group-hover:scale-110" aria-hidden />
                 <span className="relative">{label}</span>
+                {badge && counts[badge] > 0 && (
+                  <span
+                    className="relative ml-auto grid min-w-5 place-items-center rounded-full border border-dashed border-yellow-300/70 bg-yellow-300/10 px-1.5 text-[11px] font-bold leading-5 tabular-nums text-yellow-200"
+                    title={`${counts[badge]} unverified ${counts[badge] === 1 ? 'alert' : 'alerts'} waiting for review`}
+                  >
+                    {counts[badge]}
+                  </span>
+                )}
               </>
             )}
           </NavLink>

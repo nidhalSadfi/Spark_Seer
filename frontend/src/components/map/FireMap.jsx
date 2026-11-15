@@ -10,6 +10,7 @@ import {
   Flame,
   Layers,
   LocateFixed,
+  MapPinPlus,
   Maximize2,
   Minimize2,
   Minus,
@@ -21,8 +22,21 @@ import {
 } from 'lucide-react'
 import { useFilters } from '../../context/FilterContext'
 import { useActiveFires } from '../../hooks/useFireData'
+import { useReports } from '../../hooks/useReports'
 import { fmtInt } from '../../utils/format'
-import { AOI_STYLE, GlowLayer, boundsToFeature, createBaseMap, fireIcon, fireLabelIcon, inAoi } from './leafletLayers'
+import { observedLabel, timeAgo } from '../../utils/reports'
+import {
+  AOI_STYLE,
+  GlowLayer,
+  boundsToFeature,
+  createBaseMap,
+  draftIcon,
+  fireIcon,
+  fireLabelIcon,
+  inAoi,
+  reportIcon,
+  reportLabelIcon,
+} from './leafletLayers'
 import { fmtUtc } from './mapConfig'
 
 const SENSOR_CHIP = {
@@ -61,24 +75,45 @@ function ToolButton({ label, active = false, onClick, children }) {
  *   - Reads region + sensor from `useFilters()`; data comes from `useActiveFires()`.
  *   - Drawing / clearing an area calls `setAoi(feature | null)`.
  *
+ * Community fire reports (browser-local, see services/reportsStore.js) are drawn on top:
+ * unverified ones as a "?", confirmed ones as a flame with a tick, dismissed ones not at all.
+ *
  * Props:
  *   height     – CSS height of the map (default 420)
  *   compact    – preview mode for the Overview card (no slider / legend / drawing)
- *   selectedId – controlled selected fire id (optional)
- *   onSelect   – called with a fire id when a marker is clicked (optional)
+ *   selectedId – controlled selected fire or report id (optional)
+ *   onSelect   – called with a fire or report id when a marker is clicked (optional)
+ *   reportMode / onReportModeChange – "pick the spot of a new alert" mode (the button is hidden without the handler)
+ *   draft      – {lat, lon} of the spot being reported, drawn as a pulsing "?"
+ *   onPick     – called with (lat, lon) when the map is clicked in report mode
+ *   focus      – {key, lat, lon}: centre the map there once (e.g. when opened from the reports page)
  */
-export default function FireMap({ height = 420, compact = false, selectedId, onSelect }) {
+export default function FireMap({
+  height = 420,
+  compact = false,
+  selectedId,
+  onSelect,
+  reportMode = false,
+  onReportModeChange,
+  draft = null,
+  onPick,
+  focus = null,
+}) {
   const { sensor, aoi, setAoi } = useFilters()
   const { data, isLoading } = useActiveFires()
+  const { reports } = useReports()
 
   const wrapRef = useRef(null)
   const elRef = useRef(null)
   const mapRef = useRef(null)
   const layersRef = useRef(null)
   const fittedRef = useRef(null)
+  const focusedRef = useRef(null)
   const prevSelRef = useRef(null)
   const cursorRef = useRef(null)
   const selectRef = useRef(null)
+  const pickRef = useRef(null)
+  const modeRef = useRef(null)
 
   const [ownSel, setOwnSel] = useState(null)
   const controlled = selectedId !== undefined
@@ -97,6 +132,8 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
   useEffect(() => {
     selectRef.current = controlled ? onSelect : setOwnSel
     cursorRef.current = cursor
+    pickRef.current = onPick
+    modeRef.current = onReportModeChange
   })
 
   // ── map lifecycle ──
@@ -105,10 +142,12 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
     map.setView([15, 10], 2)
     const glow = new GlowLayer().addTo(map)
     const markers = L.layerGroup().addTo(map)
+    const reportMarkers = L.layerGroup().addTo(map)
     const aoiLayer = L.layerGroup().addTo(map)
     mapRef.current = map
-    layersRef.current = { glow, markers, aoiLayer }
+    layersRef.current = { glow, markers, reportMarkers, aoiLayer }
     fittedRef.current = null
+    focusedRef.current = null
     const ro = new ResizeObserver(() => map.invalidateSize())
     ro.observe(elRef.current)
     return () => {
@@ -127,6 +166,14 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
     map.fitBounds(data.bounds, { padding: [24, 24], animate: fittedRef.current !== null })
     fittedRef.current = regionKey
   }, [regionKey, data, compact])
+
+  // centre on a place asked for from outside (runs after the fit above, so it wins on first load)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !focus || !data || focusedRef.current === focus.key) return
+    focusedRef.current = focus.key
+    map.setView([focus.lat, focus.lon], Math.max(map.getZoom(), 9), { animate: false })
+  }, [focus, data, compact])
 
   // ── hotspot glow ──
   useEffect(() => {
@@ -160,17 +207,75 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
     }
   }, [data, sel, t, show.fires, compact])
 
-  // fly to a fire picked outside the map (e.g. from the details list) when it is off-screen
+  // ── community reports: "?" while unverified, a flame once confirmed, nothing once dismissed ──
+  useEffect(() => {
+    const ls = layersRef.current
+    if (!ls) return
+    ls.reportMarkers.clearLayers()
+    for (const r of reports) {
+      if (r.status === 'false') continue
+      const isSel = r.id === sel
+      const m = L.marker([r.lat, r.lon], {
+        icon: reportIcon(r, isSel),
+        keyboard: false,
+        title: r.status === 'confirmed' ? 'Confirmed fire report' : 'Unverified fire report (not confirmed yet)',
+        zIndexOffset: isSel ? 1500 : 500,
+      })
+      m.on('click', () => selectRef.current?.(r.id))
+      ls.reportMarkers.addLayer(m)
+      if (isSel && !compact) {
+        const text = `${observedLabel(r.observed)} · reported ${timeAgo(r.createdAt)}`
+        ls.reportMarkers.addLayer(
+          L.marker([r.lat, r.lon], { icon: reportLabelIcon(r, text), interactive: false, keyboard: false, zIndexOffset: 2500 }),
+        )
+      }
+    }
+    if (draft) {
+      ls.reportMarkers.addLayer(
+        L.marker([draft.lat, draft.lon], { icon: draftIcon(), interactive: false, keyboard: false, zIndexOffset: 3000 }),
+      )
+    }
+  }, [reports, sel, draft, compact])
+
+  // bring a spot typed in (or located) outside the map into view
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !draft) return
+    if (!map.getBounds().pad(-0.1).contains([draft.lat, draft.lon])) {
+      map.flyTo([draft.lat, draft.lon], Math.max(map.getZoom(), 7), { duration: 0.8 })
+    }
+  }, [draft])
+
+  // fly to a fire or report picked outside the map (e.g. from a details list) when it is off-screen
   useEffect(() => {
     const map = mapRef.current
     const prev = prevSelRef.current
     prevSelRef.current = sel
-    const f = data?.fires.find((x) => x.id === sel)
+    const f = data?.fires.find((x) => x.id === sel) ?? reports.find((x) => x.id === sel)
     if (!map || !f || prev == null || prev === sel) return
     if (!map.getBounds().pad(-0.1).contains([f.lat, f.lon])) {
       map.flyTo([f.lat, f.lon], Math.max(map.getZoom(), 5), { duration: 0.8 })
     }
-  }, [sel, data])
+  }, [sel, data, reports])
+
+  // ── report mode: click the map to say where the fire is ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !reportMode || compact) return
+    map.getContainer().style.cursor = 'crosshair'
+    const click = (e) => {
+      const p = e.latlng.wrap()
+      pickRef.current?.(+p.lat.toFixed(4), +p.lng.toFixed(4))
+    }
+    const key = (e) => e.key === 'Escape' && modeRef.current?.(false)
+    map.on('click', click)
+    window.addEventListener('keydown', key)
+    return () => {
+      map.off('click', click)
+      window.removeEventListener('keydown', key)
+      map.getContainer().style.cursor = ''
+    }
+  }, [reportMode, compact])
 
   // ── area of interest ──
   useEffect(() => {
@@ -256,6 +361,8 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
 
   const visibleFires = data ? data.fires.filter((f) => f.firstDetected <= t) : []
   const aoiFires = aoi ? visibleFires.filter((f) => inAoi(aoi, f.lat, f.lon)).length : 0
+  const openReports = reports.filter((r) => r.status !== 'false')
+  const unverified = openReports.filter((r) => r.status === 'pending').length
   const pct = win ? ((t - win.start) / (win.end - win.start)) * 100 : 100
 
   return (
@@ -274,13 +381,19 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
 
       {/* top-left: layer chip + AOI chip */}
       <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col items-start gap-2">
-        <div className={`${glass} flex items-center gap-2 px-3 py-2 text-xs text-muted`}>
+        <div className={`${glass} flex max-w-[calc(100%-12.5rem)] flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2 text-xs text-muted`}>
           <Layers className="size-4 text-faint" aria-hidden />
           <b className="font-semibold text-ink">Active fires</b>
           <span className={compact ? 'hidden' : ''}>· {SENSOR_CHIP[sensor]} · last 24 h</span>
           {data && (
             <span className="text-faint">
               · {visibleFires.length} fires · {fmtInt(data.detections.filter((d) => d.t <= t).length)} detections
+            </span>
+          )}
+          {!compact && openReports.length > 0 && (
+            <span className="text-faint">
+              · {openReports.length} {openReports.length === 1 ? 'report' : 'reports'}
+              {unverified > 0 && <span className="text-yellow-300"> ({unverified} unverified)</span>}
             </span>
           )}
         </div>
@@ -300,6 +413,11 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
           Drag on the map to draw an area · <span className="text-muted">Esc to cancel</span>
         </div>
       )}
+      {reportMode && !compact && (
+        <div className={`${glass} pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 px-3 py-2 text-xs text-ink`}>
+          Click where you see fire or smoke · <span className="text-muted">Esc to cancel</span>
+        </div>
+      )}
 
       {/* top-right tools */}
       {compact ? (
@@ -311,7 +429,26 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
         </Link>
       ) : (
         <div className="absolute right-3 top-3 z-10 flex gap-1.5">
-          <ToolButton label="Draw an area of interest" active={drawing} onClick={() => setDrawing((d) => !d)}>
+          {onReportModeChange && (
+            <ToolButton
+              label="Report a fire or smoke"
+              active={reportMode}
+              onClick={() => {
+                setDrawing(false)
+                onReportModeChange(!reportMode)
+              }}
+            >
+              <MapPinPlus className="size-4" />
+            </ToolButton>
+          )}
+          <ToolButton
+            label="Draw an area of interest"
+            active={drawing}
+            onClick={() => {
+              onReportModeChange?.(false)
+              setDrawing((d) => !d)
+            }}
+          >
             <SquareDashed className="size-4" />
           </ToolButton>
           <ToolButton label="Fit to region" onClick={() => data && mapRef.current?.fitBounds(data.bounds, { padding: [24, 24] })}>
@@ -382,6 +519,19 @@ export default function FireMap({ height = 420, compact = false, selectedId, onS
                 <p className="flex items-center gap-2 py-1">
                   <span className="size-3.5 rounded-full bg-[radial-gradient(circle,#ffd27a,#f97316_45%,transparent_72%)]" />
                   Hotspot detection · fades with age
+                </p>
+                <p className="flex items-center gap-2 py-1">
+                  <span className="grid size-4 shrink-0 place-items-center rounded-full border border-dashed border-yellow-300 bg-yellow-300/15 text-[10px] font-extrabold leading-none text-yellow-200">
+                    ?
+                  </span>
+                  Community alert · not confirmed yet
+                </p>
+                <p className="flex items-center gap-2 py-1">
+                  <span className="relative grid size-4 shrink-0 place-items-center">
+                    <Flame className="size-4 text-fire" aria-hidden />
+                    <i className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border border-[#0d1524] bg-ok" />
+                  </span>
+                  Community fire · confirmed by a reviewer
                 </p>
                 <p className="flex items-center gap-2 py-1">
                   <span className="size-3.5 rounded-full border-2 border-info" /> Selected fire

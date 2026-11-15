@@ -8,6 +8,7 @@ import {
   calendarToRows,
   getCalendar,
   getHealth,
+  getPointWeather,
   getValidation,
   getWeather,
   investigate,
@@ -83,6 +84,22 @@ export function useWeather() {
   return useQuery({
     queryKey: ['weather', region],
     queryFn: () => getWeather(region),
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  })
+}
+
+/**
+ * Weather + location context for a community fire report. It only runs once the report has been
+ * confirmed as a real fire: that is what triggers the lookup for its coordinates.
+ * The backend rounds to ~1 km, so the query key does too (nearby reports share one forecast).
+ */
+export function usePointWeather(report) {
+  const confirmed = report?.status === 'confirmed'
+  return useQuery({
+    queryKey: ['weather-point', report?.lat.toFixed(2), report?.lon.toFixed(2)],
+    queryFn: () => getPointWeather(report.lat, report.lon),
+    enabled: confirmed,
     staleTime: 30 * 60 * 1000,
     retry: false,
   })
