@@ -14,6 +14,9 @@ Repository layout:
 
 ## Run it
 
+To start the whole project (Postgres, API, fire incident agents, worker and dashboard) see **Run everything** in the
+[root README](../README.md). This section is about the API alone.
+
 The real data is committed (`data/harmonized.parquet`, `data/fires.csv`), so serving needs no build:
 
 ```bash
@@ -21,9 +24,15 @@ The real data is committed (`data/harmonized.parquet`, `data/fires.csv`), so ser
 python3 -m venv .venv            # Debian/Ubuntu: needs `sudo apt install python3-venv` first
 source .venv/bin/activate        # gives you `python`, `pip`, `uvicorn` from the venv
 pip install -r requirements.txt
-uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8000 --env-file ../.env
 # open http://localhost:8000/ for the demo page, or GET /calendar?area=bizerte&start=2003&end=2025
 ```
+
+`--env-file ../.env` makes uvicorn load the repo-root `.env` (`DATABASE_URL`, the keys, ...) itself, so there is
+nothing to export first, and it copes with Windows line endings (a CRLF file sourced with `. ./.env` leaves a hidden `\r` on
+every value). Without it, or without the database running (`docker compose up -d db`), `/reports`, `/fires/live` and
+`/processing/*` answer **503** `database not configured: DATABASE_URL is not set` (or `database unavailable`): expected without a
+database, the calendar keeps working from the parquet file, and the dashboard falls back to browser-local reports.
 
 Rebuild the data from NASA FIRMS (public files, no login; about 2 minutes and 122 MB):
 
@@ -574,6 +583,24 @@ acquisition time in the cell. Cells are ordered south to north, then west to eas
   `GET` and `POST` are always open.
 - Schema: migration `0003` creates `community_reports` (run `alembic upgrade head`); until then
   the endpoints answer 503.
+
+### Fire incident agents (started with the API)
+
+Starting the API also starts the **fire incident agents** (`harmonization-modis-viirs/incident_agents`: social-media and
+news detection of fires with a satellite cross-check, shown on the dashboard's *Social Alerts* page). `api/incidents.py`
+launches `python -m incident_agents serve` as a **separate child process** on `127.0.0.1:8765`, restarts it if it dies
+(it stops trying after 5 failed starts in a row), and stops it with the API; agents you started by hand are left alone. They
+are not imported into the API process, because they call a language model (invariant I1, tested in
+`tests/test_incidents_supervisor.py`).
+
+- **Keys** are read by the agents from the repo-root `.env` (`test_fire_groq_key`, `twitterapi`, `bsky_handle`,
+  `bsky_password`, `FIRMS_MAP_KEY_1`; see `.env.example`), or from the environment the API was started in, which wins.
+  Without the Groq key no search can run; a missing X, Bluesky or FIRMS key only skips that source. Restart the API after editing `.env`.
+- `INCIDENTS_AUTOSTART=0` turns the autostart off. It is off by default on Render (`RENDER` is set there), so the public
+  API never starts the paid agents; set `INCIDENTS_AUTOSTART=1` to opt in. `INCIDENT_PORT` changes the port.
+- `GET /incidents/status` tells whether they run and whether this API started them: `{autostart, running, managed, pid, port,
+  url, spawns, failures, gave_up, last_error}`. The agents' own API (tickets, runs, schedules, live events, `GET /api/status`
+  with which keys they see) is documented in `harmonization-modis-viirs/incident_agents/README.md`.
 
 ### Teammate routers
 

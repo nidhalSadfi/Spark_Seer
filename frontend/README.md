@@ -19,7 +19,9 @@ Other scripts: `npm run build`, `npm run preview`, `npm run lint`.
 ## Status
 - Data comes from the EmberLedger API (see below). Without it, or if it is unreachable, the app shows **illustrative sample data** generated in `src/services/fireApi.js` (`mockCalendar`), labelled as such.
 - The map's near-real-time fire layer is **always mock data** (the backend has no endpoint for it yet).
-- **Live fire map** (`src/components/map/FireMap.jsx`): Leaflet on the Esri Dark Gray basemap (no API key), fire clusters sized by FRP over a glow layer of hotspot detections, 24 h playback slider, layer toggles, legend and rectangle AOI drawing. Data comes from `getActiveFires()` in `fireApi.js`. It reads filters via `useFilters()` and calls `setAoi(...)` when an area is drawn. The map page adds the selected-fire panel (`FireDetails.jsx`) and the satellite-pass / fire-weather chart (`FirePassChart.jsx`).
+- **Live fire map** (`src/components/map/FireMap.jsx`): Leaflet on the Esri Dark Gray map or Esri satellite imagery (the *Satellite / Map* button; no API key; the choice is remembered in the browser), fire clusters sized by FRP over a glow layer of hotspot detections, 24 h playback slider, layer toggles, legend, rectangle AOI drawing and *Show my location* (browser geolocation: a blue dot with its accuracy circle and the distance to the nearest fire; browsers only allow it on https pages and on localhost). Wide views (*All areas*, or a box wider than 30°) get the API's grid answer of `/fires/live`: one marker per 0.25° or 0.5° square with its detection count and fire power, no playback (`fireFromCell` in `src/utils/fireClusters.js`). At most 500 markers are drawn (the strongest); every fire still glows.
+- **Area menu**: *All areas* first (a whole-world box for the calendar and the passport, no box at all for the live map; the weather outlook asks for one area), then the areas of `GET /areas` grouped under *Tunisia and Algeria* and *World*.
+- **Page text** stays plain: no addresses, ports, commands, settings or endpoint names. Setup and troubleshooting are in this README and the root one. Data comes from `getActiveFires()` in `fireApi.js`. It reads filters via `useFilters()` and calls `setAoi(...)` when an area is drawn. The map page adds the selected-fire panel (`FireDetails.jsx`) and the satellite-pass / fire-weather chart (`FirePassChart.jsx`).
 
 ## Structure
 `src/components/{layout,dashboard,map,reports,calendar,analytics,common,ui}`, `pages/`, `services/`, `hooks/`, `context/`, `utils/`
@@ -52,12 +54,35 @@ mention with its original link.
   *Report all … not yet reported* does the same for the tickets in the current filter, at most 25 per click.
 - **Tickets are unverified public mentions**, not official alerts. When a ticket's location is only known to a wide area, the page
   says the **?** marks the centre of that area. Links from the feeds are shown only if they are `http(s)`.
-- **The agents are a separate local service** (they hold the social-media keys and make paid calls), read here with GET only. Start
-  them with `cd backend/harmonization-modis-viirs && python -m incident_agents serve` (see its README); the page expects them at
-  `VITE_INCIDENTS_URL` (default `http://127.0.0.1:8765`) and shows how to start them when they do not answer. They allow the
-  dashboard's origin (`localhost:5173` and `:4173`); for another one set `INCIDENT_CORS_ORIGINS` for them.
+- **The agents start with the backend.** Starting the API (`cd backend && uvicorn api.main:app --reload --port 8000`) also
+  starts them, as a separate process on `127.0.0.1:8765` that holds the social-media keys (read from the repo-root `.env`)
+  and makes the paid calls; there is nothing else to start. The page expects them at `VITE_INCIDENTS_URL` (default
+  `http://127.0.0.1:8765`). When they do not answer it asks the backend (`GET /incidents/status`) and says what is wrong: the
+  backend is not running, the agents are still starting or keep stopping (with the reason), autostart is off, or they are on
+  another address. It looks again every few seconds, so it recovers by itself. The agents accept the dashboard's origin
+  (`localhost:5173` and `:4173`); for another one set `INCIDENT_CORS_ORIGINS` for the backend.
 
-Mapping and report text: `src/utils/incidents.js`; client: `src/services/incidentsApi.js`.
+### Agents tab (the console)
+`/dashboard/social?tab=agents` is the agents' console inside the page, so no second window is needed:
+
+- **Search.** Type countries or zones and run them live (last 6 to 72 hours) or **replay past dates** (3 Aug 2026 to yesterday, up
+  to 31 days). A run asks a model and searches X, Bluesky and GDELT, so it spends the free quotas of the agents' keys; only one
+  run goes at a time. **Schedules** (live only, at least every 15 min) can be added and removed.
+- **The agents as a node graph**, drawn in Hairline's style (`src/components/social/AgentGraph.jsx` + `agentGraph.css`):
+  isometric tiles for the model agents (stepped tile), the sources (ring) and the pipeline steps, dashed links that turn solid as
+  data flows. It is live: the server's step events (server-sent events) light the tiles as the run goes, a tile rises while its
+  agent works, its LED says working / done / failed / skipped, and a few words under it say what it produced ("kept 30/42",
+  "5/8 fires"). Hover or focus a tile (Tab, arrow keys) to read what it does and said last; click or Enter to filter the activity
+  log to it. It uses Hairline's `--hairline-*` colour variables, so it follows the palette of the landing page's figures. (The
+  library's own figures have a fixed shape and take no data, so this one is drawn with the same rules instead of imported.)
+- **Activity and recent runs.** The step log of the run (newest first) and the last 12 runs; pick one to see its graph again.
+  Tickets and runs refresh as the agents work, and a toast says when a run finishes or fails.
+- **Keys.** The agents read their keys from the repo-root `.env` (the file the backend uses; names in `.env.example`) or from the
+  environment the backend was started in. The search form shows which keys they can see (never the values) and blocks *Run*
+  while the Groq key is missing; a missing X, Bluesky or FIRMS key only skips that source. Restart the backend after editing `.env`.
+
+Mapping and report text: `src/utils/incidents.js`; run events → graph state: `src/utils/agentFlow.js`; client:
+`src/services/incidentsApi.js`.
 
 ## Landing page
 `/` is an interactive landing page (Hairline figures, ember particles, keyboard controls); the dashboard lives under `/dashboard`.
@@ -104,4 +129,5 @@ processing database is not connected; there is no mock data. Mapping: `src/utils
 ## Dev checks
 Plain Node scripts for the pure mapping functions (no test runner): `node dev-checks/live-data.check.mjs` (live fires,
 reports), `node dev-checks/processing-calendar.check.mjs` (job-detail mapping, calendar coverage, stats skipping
-"none" months) and `node dev-checks/incidents.check.mjs` (Social Alerts tickets, link safety, report text).
+"none" months), `node dev-checks/incidents.check.mjs` (Social Alerts tickets, link safety, report text) and
+`node dev-checks/agent-flow.check.mjs` (agent events → graph state).
