@@ -48,10 +48,18 @@ def read_firms_csvs(raw_dir) -> pd.DataFrame:
         frames.append(df)
     if not frames:
         return pd.DataFrame({c: pd.Series(dtype=object) for c in RAW_COLUMNS})
-    df = pd.concat(frames, ignore_index=True, sort=False)
-    for col in ("satellite", "instrument", "confidence", "version", "type", "acq_time"):
-        if col not in df:
-            df[col] = None
+    return raw_from_frame(pd.concat(frames, ignore_index=True, sort=False))
+
+
+def raw_from_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """One table of archive rows (read as strings, stripped column names) in raw_detections shape.
+
+    `read_firms_csvs` is this over the concatenation of every file; processing.world calls it on
+    one CSV chunk at a time. Row-wise (FIRMS dates are all ISO), so chunking never changes a row's result.
+    """
+    missing = [c for c in ("satellite", "instrument", "confidence", "version", "type", "acq_time") if c not in df]
+    if missing:  # a new frame, so the caller's table is not changed
+        df = df.assign(**{c: None for c in missing})
     fam = family_from_columns(df["instrument"], df["satellite"])
     version = df["version"].astype("string").str.strip().str.upper()
     product = np.where(version.str.endswith("NRT").fillna(False), "NRT", "SP")
