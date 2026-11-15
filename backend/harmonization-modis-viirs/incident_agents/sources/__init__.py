@@ -31,6 +31,10 @@ class SourceError(RuntimeError):
     pass
 
 
+class RateLimited(SourceError):
+    """The source asked us to slow down (HTTP 429). Not a failure of ours: the run skips it and says so."""
+
+
 def utc_iso(value) -> str | None:
     """Normalise ISO strings, RFC-2822 dates ('Sat Nov 14 22:12:55 +0000 2026'), GDELT
     '20261114T221500Z' and unix seconds to 'YYYY-MM-DDTHH:MM:SSZ'."""

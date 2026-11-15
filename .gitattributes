@@ -1,0 +1,7 @@
+# Files that Linux tools read must stay LF even on a Windows checkout (core.autocrlf would make them CRLF).
+# A CRLF .env makes `set -a; . ./.env` print ": command not found" and leaves a hidden \r on every value.
+# .env itself is gitignored, but it is normally created with `cp .env.example .env`, so keeping the example LF
+# keeps the copy LF.
+.env.example text eol=lf
+*.sh text eol=lf
+docker/initdb/* text eol=lf

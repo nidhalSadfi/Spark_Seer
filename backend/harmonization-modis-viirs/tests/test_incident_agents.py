@@ -304,7 +304,7 @@ def test_server_endpoints_with_fake_runner():
     assert c.post("/api/runs", json={"query": "x", "hours": 999}).status_code == 422
 
 
-def test_server_lets_only_the_dashboard_read_tickets(monkeypatch):
+def test_server_lets_only_the_dashboard_use_the_api(monkeypatch):
     from fastapi.testclient import TestClient
 
     from incident_agents.server import create_app
@@ -313,9 +313,19 @@ def test_server_lets_only_the_dashboard_read_tickets(monkeypatch):
     dash, other = "http://localhost:5173", "https://example.com"
     assert c.get("/api/tickets", headers={"Origin": dash}).headers["access-control-allow-origin"] == dash
     assert "access-control-allow-origin" not in c.get("/api/tickets", headers={"Origin": other}).headers
-    # a browser preflight for a write from the dashboard is refused: only GET is allowed cross-origin
-    pre = c.options("/api/runs", headers={"Origin": dash, "Access-Control-Request-Method": "POST"})
-    assert pre.status_code == 400
+    # the agent console starts runs and edits schedules from the dashboard: its preflights pass...
+    for method, path in (("POST", "/api/runs"), ("POST", "/api/schedules"), ("DELETE", "/api/schedules/1")):
+        pre = c.options(path, headers={"Origin": dash, "Access-Control-Request-Method": method,
+                                       "Access-Control-Request-Headers": "content-type"})
+        assert pre.status_code == 200 and pre.headers["access-control-allow-origin"] == dash
+    # ...and a browser on any other page is refused, so it cannot spend the paid quotas
+    for method in ("POST", "DELETE"):
+        pre = c.options("/api/runs", headers={"Origin": other, "Access-Control-Request-Method": method})
+        assert pre.status_code == 400
+    # nothing else is opened up (no PUT/PATCH, no custom headers)
+    assert c.options("/api/runs", headers={"Origin": dash, "Access-Control-Request-Method": "PUT"}).status_code == 400
+    assert c.options("/api/runs", headers={"Origin": dash, "Access-Control-Request-Method": "POST",
+                                           "Access-Control-Request-Headers": "x-admin-token"}).status_code == 400
     # INCIDENT_CORS_ORIGINS overrides the default list; empty allows nobody
     monkeypatch.setenv("INCIDENT_CORS_ORIGINS", "https://dash.example.org/, http://localhost:3000")
     custom = TestClient(create_app(Store(":memory:"), scheduler=False, runner=lambda *a, **k: None))
@@ -498,3 +508,167 @@ def test_lead_ignores_region_mentions_and_news_roundups():
     sat = {"source": "kanari", "first_seen": iso(NOW - timedelta(minutes=30))}
     lead = tickets.lead_times(s, tid, [sat])
     assert lead["first_post"].endswith("/1") and lead["minutes_vs_kanari"] == 30
+
+
+# --- keys from the repo-root .env, status, and the parent watchdog -----------------------------
+def _env_files(monkeypatch, tmp_path, own="", root=""):
+    """Point the agents' config at two temp .env files and clear every real key from the environment."""
+    from incident_agents import config
+    own_f, root_f = tmp_path / "own.env", tmp_path / "root.env"
+    own_f.write_text(own, encoding="utf-8")
+    root_f.write_text(root, encoding="utf-8")
+    monkeypatch.setattr(config, "ENV_FILES", (own_f, root_f))
+    monkeypatch.setattr(config, "_env_cache", None)
+    for names in config.SECRET_NAMES.values():
+        for n in names:
+            monkeypatch.delenv(n, raising=False)
+    for n in config.FIRMS_NAMES:
+        monkeypatch.delenv(n, raising=False)
+    return config
+
+
+def test_keys_come_from_the_repo_root_env_when_the_package_has_none(monkeypatch, tmp_path):
+    config = _env_files(monkeypatch, tmp_path, root=(
+        "# shared by the whole backend\nDATABASE_URL=postgresql://u:p@h/db\n"
+        "test_fire_groq_key=gsk_rootvalue123\ntwitterapi='tw_rootvalue456'\nbsky_handle=me.bsky.social\n"
+        "bsky_password=abcd-efgh-ijkl-mnop  # an app password\nFIRMS_MAP_KEY_1=firmsrootkey789\n"))
+    assert config.secret("groq") == "gsk_rootvalue123"
+    assert config.secret("twitterapi") == "tw_rootvalue456"          # quotes stripped
+    assert config.secret("bsky_app_password") == "abcd-efgh-ijkl-mnop"  # inline comment dropped
+    assert config.key_status() == {"groq": True, "x": True, "bluesky": True, "firms": True}
+    import os
+    assert os.environ["FIRMS_MAP_KEY_1"] == "firmsrootkey789"          # visible to firms_tool now
+    monkeypatch.delenv("FIRMS_MAP_KEY_1")                              # leave nothing behind for other tests
+
+
+def test_precedence_environment_then_package_env_then_root_env(monkeypatch, tmp_path):
+    config = _env_files(monkeypatch, tmp_path, own="test_fire_groq_key=from_own\ntwitterapi=own_x\n",
+                        root="test_fire_groq_key=from_root\ntwitterapi=root_x\nbsky_handle=root.handle\n")
+    assert config.secret("groq") == "from_own"           # the package's own file beats the root file
+    assert config.secret("bsky_handle") == "root.handle"  # a name only the root file has still counts
+    monkeypatch.setenv("GROQ_API_KEY", "from_environment")
+    assert config.secret("groq") == "from_environment"    # a real environment variable beats both files
+
+
+def test_status_reports_presence_never_values(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from incident_agents.server import create_app
+    config = _env_files(monkeypatch, tmp_path, root="test_fire_groq_key=gsk_supersecret_value\n")
+    c = TestClient(create_app(Store(":memory:"), scheduler=False, runner=lambda *a, **k: None))
+    r = c.get("/api/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["keys"] == {"groq": True, "x": False, "bluesky": False, "firms": False}
+    assert body["env_files"]["repo_root"] is True and body["scheduler"] is False
+    assert "gsk_supersecret_value" not in r.text
+    assert "gsk_supersecret_value" not in config.redact("leaked gsk_supersecret_value here")  # and a leak is redacted
+
+
+def test_a_missing_env_file_is_not_an_error(monkeypatch, tmp_path):
+    config = _env_files(monkeypatch, tmp_path)
+    (tmp_path / "root.env").unlink()
+    assert config.key_status() == {"groq": False, "x": False, "bluesky": False, "firms": False}
+    assert config.env_files_found() == {"agents_dir": True, "repo_root": False}
+
+
+def test_parent_watchdog():
+    import subprocess
+    import sys
+    import threading
+
+    from incident_agents.parent import exit_with_parent, parent_alive
+    import os
+    assert parent_alive(os.getpid()) and not parent_alive(0) and not parent_alive(-5)
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    assert not parent_alive(child.pid)  # a process that has ended
+    gone = threading.Event()
+    exit_with_parent(child.pid, interval=0.05, on_gone=gone.set)
+    assert gone.wait(2)
+    alive = threading.Event()
+    exit_with_parent(os.getpid(), interval=0.05, on_gone=alive.set)
+    assert not alive.wait(0.4)  # our own process is alive, so the watchdog stays quiet
+
+
+def test_a_carriage_return_left_on_exported_values_does_not_break_the_keys(monkeypatch, tmp_path):
+    """`set -a; . ./.env` on a Windows (CRLF) file exports every value with a hidden \r at the end."""
+    import os
+
+    config = _env_files(monkeypatch, tmp_path)
+    monkeypatch.setenv("test_fire_groq_key", "gsk_realvalue123\r")
+    monkeypatch.setenv("twitterapi", "  tw_realvalue456 \r\n")
+    monkeypatch.setenv("bsky_handle", "me.bsky.social\r")
+    monkeypatch.setenv("bsky_password", "abcd-efgh-ijkl-mnop\r")
+    monkeypatch.setenv("FIRMS_MAP_KEY_1", "firmsrealkey789\r")
+    assert config.secret("groq") == "gsk_realvalue123"
+    assert config.secret("twitterapi") == "tw_realvalue456"
+    assert config.secret("bsky_app_password") == "abcd-efgh-ijkl-mnop"
+    assert config.key_status() == {"groq": True, "x": True, "bluesky": True, "firms": True}
+    assert os.environ["FIRMS_MAP_KEY_1"] == "firmsrealkey789"  # firms_tool reads the environment itself
+    monkeypatch.setenv("test_fire_groq_key", "\r")             # a value that is only a \r counts as unset
+    assert config.secret("groq") is None
+
+
+# --- a rate-limited source is skipped, not a failure -------------------------------------------------
+def test_gdelt_429_is_a_rate_limit_not_a_failure():
+    from incident_agents.sources import RateLimited, SourceError
+    from incident_agents.sources.gdelt import Gdelt
+
+    class Resp:
+        def __init__(self, status, text=""):
+            self.status_code, self.text = status, text
+
+        def json(self):
+            return {}
+
+    class Session:
+        def __init__(self, resp):
+            self.headers, self.resp = {}, resp
+
+        def get(self, *a, **k):
+            return self.resp
+
+    def search(resp):
+        return Gdelt(session=Session(resp)).search(["incendie"], "fr", "FR", 24, 10)
+
+    with pytest.raises(RateLimited, match="rate limited"):
+        search(Resp(429))
+    with pytest.raises(RateLimited):
+        search(Resp(200, "Please limit requests to one every 5 seconds."))  # GDELT also says it in the body
+    with pytest.raises(SourceError) as other:
+        search(Resp(500))
+    assert not isinstance(other.value, RateLimited)  # a server error is still a plain failure
+
+
+def test_a_rate_limited_source_is_reported_as_skipped_and_the_run_goes_on():
+    from incident_agents.sources import RateLimited
+
+    class ThrottledGdelt:
+        def search(self, *a, **k):
+            raise RateLimited("gdelt: rate limited (HTTP 429)")
+
+    s = Store(":memory:")
+    clients = Clients(llm=FakeLLM(), geocoder=FakeGeocoder(), kanari=FakeKanariFull(),
+                      bluesky=FakeSource([rec(1), rec(2)]), gdelt=ThrottledGdelt())
+    summary = run("France", 24, s, clients, Options(sources=("kanari", "bluesky", "gdelt"), firms_check=False), echo=False)
+    assert summary["tickets_created"] == 1  # Bluesky's posts still made their ticket
+    gdelt = [(e["status"], e["message"]) for e in s.events_after(0) if e["step"] == "fetch" and e["source"] == "gdelt"]
+    assert [st for st, _ in gdelt] == ["running", "skipped"]
+    assert "rate limited" in gdelt[-1][1] and "skipped in this run" in gdelt[-1][1]
+    assert ("run", "done") in {(e["step"], e["status"]) for e in s.events_after(0)}
+
+
+def test_other_source_failures_are_still_errors():
+    from incident_agents.sources import SourceError
+
+    class BrokenGdelt:
+        def search(self, *a, **k):
+            raise SourceError("gdelt: HTTP 500")
+
+    s = Store(":memory:")
+    clients = Clients(llm=FakeLLM(), geocoder=FakeGeocoder(), kanari=FakeKanariFull(),
+                      bluesky=FakeSource([rec(1), rec(2)]), gdelt=BrokenGdelt())
+    run("France", 24, s, clients, Options(sources=("kanari", "bluesky", "gdelt"), firms_check=False), echo=False)
+    gdelt = [e["status"] for e in s.events_after(0) if e["step"] == "fetch" and e["source"] == "gdelt"]
+    assert gdelt == ["running", "error"]

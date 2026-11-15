@@ -13,6 +13,7 @@ import importlib.util
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -21,6 +22,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import core, database
+from api import incidents
 from api.fires import router as fires_router
 from api.processing_status import router as processing_router
 from api.reports import router as reports_router
@@ -30,7 +32,18 @@ WEB_DIR = ROOT / "web"
 METEO_DIR = ROOT / "meteomatics-weather"
 
 log = logging.getLogger("uvicorn.error")
-app = FastAPI(title="EmberLedger")
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    # Starting the API also starts the fire incident agents, as a separate process (api/incidents.py):
+    # they call an LLM, which this process never does (I1). They stop with the API.
+    incidents.supervisor.start()
+    yield
+    incidents.supervisor.stop()
+
+
+app = FastAPI(title="EmberLedger", lifespan=lifespan)
 # The reports page sends PATCH/DELETE with an X-Admin-Token header ("*" headers covers it).
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "PATCH", "DELETE"],
                    allow_headers=["*"])
@@ -40,6 +53,7 @@ app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
 app.include_router(processing_router)
 app.include_router(fires_router)
 app.include_router(reports_router)
+app.include_router(incidents.router)
 
 # Teammate routers (api/passport.py, api/weather.py): optional, so the app starts without them.
 try:

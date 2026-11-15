@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("serve", help="page + scheduler on 127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--no-scheduler", action="store_true")
+    s.add_argument("--exit-with-parent", type=int, default=None, metavar="PID",
+                   help="exit when this process is gone (used by the backend that launches the agents)")
     sub.add_parser("schedule-loop", help="run due schedules forever")
     t = sub.add_parser("tickets")
     t.add_argument("--limit", type=int, default=20)
@@ -63,6 +65,9 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
 
         from .server import create_app
+        if a.exit_with_parent:
+            from .parent import exit_with_parent
+            exit_with_parent(a.exit_with_parent)
         uvicorn.run(create_app(scheduler=not a.no_scheduler), host="127.0.0.1", port=a.port, log_level="warning")
     elif a.cmd == "schedule-loop":
         from .scheduler import Scheduler

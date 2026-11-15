@@ -6,7 +6,10 @@ POST /api/runs              {"query", "hours"} -> starts a run in the background
 GET  /api/events/stream     server-sent events from the events table (?after=<id>)
 GET  /api/tickets           tickets with every source URL, publish time and fetch time
 GET  /api/runs              recent runs
+GET  /api/status            which keys the agents can see (booleans only) and which .env files exist
 GET|POST|DELETE /api/schedules
+
+Started by the backend (backend/api/incidents.py) alongside the API, or by hand: python -m incident_agents serve.
 """
 
 from __future__ import annotations
@@ -47,9 +50,12 @@ def create_app(store: Store | None = None, scheduler: bool = True, runner=run, r
     store = store or Store()
     sched = Scheduler(store, runner)
     app = FastAPI(title="Fire incident agents")
-    # The dashboard (another origin) may read tickets and runs, nothing more: GET only. Starting
-    # runs and editing schedules stay with this machine's own page, because they spend paid quotas.
-    app.add_middleware(CORSMiddleware, allow_origins=config.cors_origins(), allow_methods=["GET"], allow_headers=[])
+    # The dashboard (another origin) runs the Social Alerts page, including its agent console, so the
+    # listed origins (localhost:5173/4173 by default, INCIDENT_CORS_ORIGINS to change) may read AND
+    # start runs / edit schedules. Every other origin is refused by the browser. Runs spend paid
+    # quotas, so keep this list to dashboards you trust; the server itself listens on 127.0.0.1 only.
+    app.add_middleware(CORSMiddleware, allow_origins=config.cors_origins(),
+                       allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"])
 
     if scheduler:
         @app.on_event("startup")
@@ -83,6 +89,12 @@ def create_app(store: Store | None = None, scheduler: bool = True, runner=run, r
                 sched.run_lock.release()
         threading.Thread(target=work, daemon=True).start()
         return {"started": True, "events_after": last}
+
+    @app.get("/api/status")
+    def status():
+        """Which keys the agents can see (booleans only, never a value) and which .env files exist."""
+        return {"keys": config.key_status(), "env_files": config.env_files_found(), "model": config.GROQ_MODEL,
+                "scheduler": scheduler}
 
     @app.get("/api/runs")
     def runs(limit: int = 20):

@@ -13,7 +13,7 @@ import requests
 
 from ..config import USER_AGENT
 from ..store import now_iso
-from . import Record, SourceError, utc_iso
+from . import RateLimited, Record, SourceError, utc_iso
 
 URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 FIPS = {"FR": "FR", "DZ": "AG", "TN": "TS", "MA": "MO", "ES": "SP", "PT": "PO", "IT": "IT",
@@ -50,7 +50,7 @@ class Gdelt:
             finally:
                 self._last = time.monotonic()
         if r.status_code == 429 or r.text.startswith("Please limit"):
-            raise SourceError("gdelt: rate limited (HTTP 429)")
+            raise RateLimited("gdelt: rate limited (HTTP 429)")
         if r.status_code != 200:
             raise SourceError(f"gdelt: HTTP {r.status_code}")
         try:

@@ -6,7 +6,9 @@ A scheduled, multi-source search for public fire reports. You type countries or 
 
 ## Run it
 
-From `harmonization-modis-viirs/`:
+**With the backend (the normal way).** Starting the API (`cd backend && uvicorn api.main:app --reload --port 8000`) starts these agents too, as a separate process on `127.0.0.1:8765` (`backend/api/incidents.py`), restarts them if they die and stops them with the API. They read their keys from the **repo-root `.env`** (see `.env.example`), or from the environment (which wins); the package's own `.env` still works and wins over the root one. Restart the API after editing a key. `INCIDENTS_AUTOSTART=0` turns the autostart off and `INCIDENT_PORT` changes the port. `GET /api/status` here says which keys are visible (booleans, never values).
+
+**By hand**, from `harmonization-modis-viirs/`:
 
 ```bash
 uv pip install --python .venv/Scripts/python.exe -r requirements-incidents.txt
@@ -19,7 +21,7 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-incidents.txt
 
 `serve` runs the page and the scheduler in one process, bound to 127.0.0.1 only. Data is stored in `data/incidents/incidents.sqlite`, which is gitignored.
 
-**From the dashboard.** The React dashboard's *Social Alerts* page (`frontend/`, `/dashboard/social`) reads `GET /api/tickets` from this server and lets people report a ticket as a community fire alert. For that the server answers cross-origin **GET** requests from `http://localhost:5173` and `:4173` (and the `127.0.0.1` forms). Set `INCIDENT_CORS_ORIGINS` (comma-separated, empty for none) to allow another dashboard address. Starting runs and editing schedules are never allowed cross-origin.
+**From the dashboard.** The React dashboard's *Social Alerts* page (`frontend/`, `/dashboard/social`) reads the tickets from this server and has this page's console built in (its *Agents* tab: start a run or a replay, schedules, the live step events as a node graph), and it lets people report a ticket as a community fire alert. For that the server answers cross-origin **GET, POST and DELETE** requests (JSON bodies) from `http://localhost:5173` and `:4173` (and the `127.0.0.1` forms). Any other web page is refused by the browser, so it cannot start a run and spend the quotas. Set `INCIDENT_CORS_ORIGINS` (comma-separated, empty for none) to allow another dashboard address, and keep that list to dashboards you trust. This page keeps working as before.
 
 ### 25-year cell history (optional, built once)
 
@@ -34,6 +36,8 @@ Tickets in Tunisia, Algeria and France north of 34°N show the fire history of t
 Without the file, tickets simply carry no history. If you add more countries, set `INCIDENT_HISTORY_COUNTRIES` (default `TN,DZ,FR`) to match.
 
 ## Secrets (`.env`, gitignored)
+
+Put these names in the repo-root `.env` (the file the whole backend is configured from; the names are in `.env.example`) or in a `.env` next to this folder's `requirements-incidents.txt`. A real environment variable wins over both files, and this folder's file wins over the root one.
 
 | Purpose | Name in .env |
 |---|---|

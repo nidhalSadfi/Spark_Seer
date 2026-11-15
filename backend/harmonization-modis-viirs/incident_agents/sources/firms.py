@@ -15,6 +15,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from firms_tool import area_api
 
+from .. import config
+
 SENSORS = ("viirs_noaa20", "viirs_noaa21", "modis_c61")
 SNPP_END = date(2026, 11, 2)  # S-NPP data are valid before this date
 NRT_DAYS = 9
@@ -30,6 +32,7 @@ class _FastClient(area_api.Client):
 
 class Firms:
     def __init__(self):
+        config.apply_env_files()  # the key may be in the repo-root .env, which firms_tool does not read
         key = area_api.resolve_map_key()
         self.client = _FastClient(key, log=lambda m: None) if key else None
 

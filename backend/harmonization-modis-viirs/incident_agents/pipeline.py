@@ -17,7 +17,7 @@ from .geo import Geocoder, in_box
 from .judge import judge
 from .llm import Groq
 from .planner import Plan, PlanError, make_plan
-from .sources import Record, SourceError, parse_iso, utc_iso
+from .sources import RateLimited, Record, SourceError, parse_iso, utc_iso
 from .sources.bluesky import Bluesky
 from .sources.firms import Firms
 from .sources.gdelt import Gdelt
@@ -30,6 +30,15 @@ ALL_SOURCES = ("kanari", "bluesky", "x", "gdelt")
 # Saharan gas flares pass satellite vegetation filters; the main project cuts at 34°N for the same reason.
 FLARE_COUNTRIES = {"DZ", "TN", "LY"}
 FLARE_LAT = 34.0
+
+def fetch_failed(report, e: SourceError, source: str) -> None:
+    """Report a source that did not deliver. A rate limit is the source asking us to slow down, not a failure:
+    the run goes on without it, and the step says skipped rather than error."""
+    if isinstance(e, RateLimited):
+        report("fetch", "skipped", f"{e}; skipped in this run, try again in a few minutes", source=source)
+    else:
+        report("fetch", "error", str(e), source=source)
+
 
 
 @dataclass
@@ -80,7 +89,7 @@ def fetch_all(plan: Plan, c: Clients, opts: Options, store: Store, report: Repor
             report("fetch", "ok", f"{len(recs)} posts in the zones ({ATTRIBUTION})", source="kanari",
                    data={"count": len(recs)})
         except SourceError as e:
-            report("fetch", "error", str(e), source="kanari")
+            fetch_failed(report, e, "kanari")
 
     if "bluesky" in opts.sources:
         if not c.bluesky.available:
@@ -93,7 +102,7 @@ def fetch_all(plan: Plan, c: Clients, opts: Options, store: Store, report: Repor
                     records += recs
                     report("fetch", "ok", f"{lang}: {len(recs)} posts", source="bluesky", data={"count": len(recs)})
                 except SourceError as e:
-                    report("fetch", "error", str(e), source="bluesky")
+                    fetch_failed(report, e, "bluesky")
 
     if "x" in opts.sources:
         if not c.x.available:
@@ -117,7 +126,7 @@ def fetch_all(plan: Plan, c: Clients, opts: Options, store: Store, report: Repor
                            data={"count": len(recs), "pages": pages})
                 except SourceError as e:
                     store.add_usage("x", 1)
-                    report("fetch", "error", str(e), source="x")
+                    fetch_failed(report, e, "x")
 
     if "gdelt" in opts.sources:
         for cc in countries:
@@ -135,7 +144,7 @@ def fetch_all(plan: Plan, c: Clients, opts: Options, store: Store, report: Repor
                     report("fetch", "ok", f"{cc}/{lang}: {len(recs)} headlines", source="gdelt",
                            data={"count": len(recs)})
                 except SourceError as e:
-                    report("fetch", "error", str(e), source="gdelt")
+                    fetch_failed(report, e, "gdelt")
     return records
 
 
@@ -349,7 +358,7 @@ def run(query: str, hours: int, store: Store, clients: Clients | None = None, op
                                                "cluster", 3.0))
                     report("fetch", "ok", f"satellite clusters for {z.label}", source="kanari")
                 except SourceError as e:
-                    report("fetch", "error", str(e), source="kanari")
+                    fetch_failed(report, e, "kanari")
 
         open_tickets = store.recent_tickets(utc_iso((now - timedelta(hours=72)).isoformat()))
         touched, created = make_tickets(located, open_tickets, store, run_id, report)
@@ -456,7 +465,7 @@ def replay(query: str, start: str | date, end: str | date, store: Store, clients
                        (" (Kanari's 100-item limit reached: use a shorter range to see every fire)" if capped else "")
                        + f" ({ATTRIBUTION})", source="kanari", data={"count": len(fires), "capped": capped})
             except SourceError as e:
-                report("fetch", "error", str(e), source="kanari")
+                fetch_failed(report, e, "kanari")
         seeds, n_inside = pick_seeds(all_fires, plan, start, end, max_fires, clients.geocoder)
         report("filter", "ok", f"replaying {len(seeds)} of {n_inside} archived fires in the zones "
                f"(witness posts or press first, then size)", source="kanari",
@@ -499,7 +508,7 @@ def replay(query: str, start: str | date, end: str | date, store: Store, clients
                         if len(bs) >= caps.BLUESKY_LIMIT_PER_QUERY:
                             truncated_seeds.add(rec.url)
                     except SourceError as e:
-                        report("fetch", "error", str(e), source="bluesky")
+                        fetch_failed(report, e, "bluesky")
                 if "x" in opts.sources and clients.x.available:
                     if x_pages < 2 * max_fires and store.usage_today("x") < caps.TWITTER_PAGES_PER_DAY:
                         try:
@@ -512,7 +521,7 @@ def replay(query: str, start: str | date, end: str | date, store: Store, clients
                             store.add_usage("x", pages)
                         except SourceError as e:
                             store.add_usage("x", 1)
-                            report("fetch", "error", str(e), source="x")
+                            fetch_failed(report, e, "x")
                     else:
                         report("fetch", "skipped", f"{name}: X page cap reached", source="x")
             for r in found:

@@ -3,6 +3,9 @@
 services:
   db:
     image: postgres:16.4-alpine
+    # Comes back by itself after a reboot or a `wsl --shutdown` (Docker stops it with the VM; without this
+    # the database stays down and /reports, /fires/live and /processing/* answer 503 until you start it again).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-emberguard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-emberguard}
