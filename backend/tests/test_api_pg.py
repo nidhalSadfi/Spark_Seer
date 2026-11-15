@@ -425,7 +425,10 @@ def test_fires_live_window_bbox_source_and_shape(api, pg):
     assert body["window"] == {"start": "2026-11-13T00:58:00Z", "end": "2026-11-15T00:58:00Z"}
     assert body["snapshot"] == "2026-11-15T03:31:00Z"  # the latest stored FIRMS fetch
     assert fire_ids(body) == [3, 2, 6, 1]  # oldest first
-    assert body["meta"] == {"count": 4, "product": "NRT", "hours": 48, "bbox": None}
+    # The original meta fields, plus the grid thresholds (spec §16); a small result stays "detections".
+    assert {k: body["meta"][k] for k in ("count", "product", "hours", "bbox")} == \
+        {"count": 4, "product": "NRT", "hours": 48, "bbox": None}
+    assert body["mode"] == "detections" and body["meta"]["resolution"] is None and "cells" not in body
     assert body["sources"] == [{"source": "MODIS_NRT", "max_acq_date": "2026-11-14"},
                                {"source": "VIIRS_NOAA20_NRT", "max_acq_date": "2026-11-13"},
                                {"source": "VIIRS_NOAA21_NRT", "max_acq_date": "2026-11-15"}]
@@ -452,8 +455,40 @@ def test_fires_live_window_bbox_source_and_shape(api, pg):
 
 def test_fires_live_with_no_detections(api, pg):
     body = api.get("/fires/live?bbox=8,36,10,37").json()
-    assert body == {"snapshot": None, "window": {"start": None, "end": None}, "detections": [], "sources": [],
-                    "meta": {"count": 0, "product": "NRT", "hours": 48, "bbox": [8.0, 36.0, 10.0, 37.0]}}
+    assert body == {"mode": "detections", "snapshot": None, "window": {"start": None, "end": None},
+                    "detections": [], "sources": [],
+                    "meta": {"count": 0, "product": "NRT", "hours": 48, "bbox": [8.0, 36.0, 10.0, 37.0],
+                             "resolution": None, "max_detections": 20000, "grid_span_deg": 30.0,
+                             "fine_grid_max_span_deg": 90.0}}
+
+
+def test_fires_live_grid_mode(api, pg, monkeypatch):
+    """Spec §16: a grid of cells instead of detections for a wide bbox, above the detection cap, or
+    with mode=grid; 0.25 degrees up to a 90-degree span, 0.5 beyond (no bbox = the world)."""
+    add_detections(pg.engine, FIRE_DETECTIONS)
+    world = api.get("/fires/live?mode=grid").json()
+    assert world["mode"] == "grid" and world["detections"] == [] and world["meta"]["resolution"] == 0.5
+    assert world["window"] == {"start": "2026-11-13T00:58:00Z", "end": "2026-11-15T00:58:00Z"}  # unchanged
+    assert world["cells"] == [
+        {"lat": 30.75, "lon": 0.75, "count": 1, "frp_sum": 3.0, "frp_max": 3.0, "modis": 0, "viirs": 1,
+         "latest": "2026-11-14T12:00:00Z"},
+        {"lat": 36.25, "lon": 8.75, "count": 1, "frp_sum": None, "frp_max": None, "modis": 0, "viirs": 1,
+         "latest": "2026-11-13T00:58:00Z"},
+        {"lat": 36.75, "lon": 9.25, "count": 2, "frp_sum": 19.9, "frp_max": 14.7, "modis": 1, "viirs": 1,
+         "latest": "2026-11-15T00:58:00Z"}]
+    assert world["meta"]["count"] == 4 == sum(c["count"] for c in world["cells"]) and world["meta"]["cells"] == 3
+
+    wide = api.get("/fires/live?bbox=-10,20,30,45").json()  # 40 degrees wide > FIRES_LIVE_GRID_SPAN_DEG (30)
+    assert wide["mode"] == "grid" and wide["meta"]["resolution"] == 0.25
+    assert [(c["lat"], c["lon"], c["count"]) for c in wide["cells"]] == \
+        [(30.625, 0.625, 1), (36.375, 8.625, 1), (36.875, 9.125, 2)]
+    assert api.get("/fires/live?bbox=0,30,29,45").json()["mode"] == "detections"  # 29 degrees: detections
+
+    monkeypatch.setenv("FIRES_LIVE_MAX_DETECTIONS", "3")  # 4 detections in the window: over the cap
+    capped = api.get("/fires/live").json()
+    assert capped["mode"] == "grid" and capped["meta"]["max_detections"] == 3 and capped["meta"]["count"] == 4
+    assert api.get("/fires/live?hours=1").json()["mode"] == "detections"  # 1 detection: under the cap
+    assert api.get("/fires/live?mode=bogus").status_code == 400
 
 
 # -- /reports --------------------------------------------------------------------------------------

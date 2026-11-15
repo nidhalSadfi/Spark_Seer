@@ -17,13 +17,16 @@ from dataclasses import replace
 from datetime import date, timedelta
 from typing import Mapping
 
+import numpy as np
 import pandas as pd
+import pyarrow as pa
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+import pgcopy
 from processing.boundary import load_boundary
 from processing.common import KEY_COLS, family_of, jsonable, month_bounds
-from processing.grid import with_keys
+from processing.grid import cell_index, with_keys
 from processing.mask import load_mask
 from processing.params import DEFAULT_PARAMS, ProcessingParams
 from worker import store
@@ -41,17 +44,31 @@ STATUS_FOR = {"approve": "succeeded", "hold": "held", "reject": "rejected"}
 
 
 def params_for(settings) -> ProcessingParams:
-    """The default science with the deployment's drift thresholds (processing/params.py)."""
-    return replace(DEFAULT_PARAMS, drift_warn_pct=settings.drift_warn_pct, drift_min_count=settings.drift_min_count)
+    """The default science with the deployment's drift thresholds and latitude cut (processing/params.py;
+    PROCESSING_MIN_LAT=none for the world, spec §16)."""
+    return replace(DEFAULT_PARAMS, drift_warn_pct=settings.drift_warn_pct, drift_min_count=settings.drift_min_count,
+                   min_lat=settings.processing_min_lat)
 
 
 # ----------------------------------------------------------------------------- inputs
 
+PENDING_TYPES = {"id": pa.int64(), "content_hash": pa.string(), "latitude": pa.float64(), "longitude": pa.float64(),
+                 "acq_date": pa.date32()}
+DETECTION_TYPES = {"source": pa.string(), "product": pa.string(), "satellite": pa.string(), "latitude": pa.float64(),
+                   "longitude": pa.float64(), "acq_date": pa.date32(), "acq_time": pa.string(),
+                   "confidence": pa.string(), "type": pa.int16(), "instrument": pa.string()}
+
+
 def load_pending(engine: Engine) -> pd.DataFrame:
+    """id, content_hash, latitude, longitude, acq_date of every pending detection, by id.
+
+    Read with COPY (spec §16: millions of rows on a world poll); the hashes stay in Arrow memory
+    and acq_date is datetime64. Promotion clears exactly these (id, content_hash) pairs.
+    """
     with engine.connect() as c:
-        rows = c.execute(text("SELECT id, content_hash, latitude, longitude, acq_date FROM raw_detections "
-                              "WHERE needs_processing ORDER BY id")).all()
-    return pd.DataFrame(rows, columns=["id", "content_hash", "latitude", "longitude", "acq_date"])
+        return pgcopy.read_frame(c, "SELECT id, content_hash, latitude, longitude, acq_date FROM raw_detections "
+                                    "WHERE needs_processing ORDER BY id", None, PENDING_TYPES,
+                                 arrow_strings=("content_hash",))
 
 
 def affected_keys(pending: pd.DataFrame, params: ProcessingParams = DEFAULT_PARAMS) -> pd.DataFrame:
@@ -63,41 +80,65 @@ def affected_keys(pending: pd.DataFrame, params: ProcessingParams = DEFAULT_PARA
     return keyed[KEY_COLS].drop_duplicates().sort_values(KEY_COLS).reset_index(drop=True).astype("int64")
 
 
+# Per affected month: the month's date range, the affected cells' bounding box (padded) and the
+# affected cells themselves, as cell codes cy * CELL_CODE + cx (SQL's floor(deg / cell_deg) on
+# float8 is the same IEEE operation as processing.grid.cell_index; the codes are whole numbers far
+# below 2^53, exact in float8). The codes are a constant array (psycopg merges COPY parameters
+# client-side), which PostgreSQL >= 14 probes with a hash table: one lookup per row, never a
+# join plan that could rescan the table per cell. All of it only pre-selects: the exact
+# membership is decided again in Python with processing.grid's rule (_inside_keys).
+CELL_CODE = 1 << 20
+_DETECTIONS_SQL = """
+    SELECT r.source, r.product, r.satellite, r.latitude, r.longitude, r.acq_date, r.acq_time_raw AS acq_time,
+           r.confidence, r."type", r.instrument
+    FROM raw_detections AS r
+    WHERE r.acq_date BETWEEN %(first)s AND %(last)s AND r.latitude >= %(lat0)s AND r.latitude < %(lat1)s
+      AND r.longitude >= %(lon0)s AND r.longitude < %(lon1)s
+      AND floor(r.latitude / CAST(%(deg)s AS double precision)) * %(code)s
+          + floor(r.longitude / CAST(%(deg)s AS double precision)) = ANY(CAST(%(cells)s AS double precision[]))"""
+
+
 def load_detections(engine: Engine, keys: pd.DataFrame, params: ProcessingParams = DEFAULT_PARAMS) -> pd.DataFrame:
     """ALL stored detections (any source, product or flag) of the affected cell-months (§6 step 5).
 
-    Per month, SQL pre-selects the date range and the cells' bounding box (padded); the exact cell
-    membership is then decided in Python with the same rule as processing.grid.
+    Per month, SQL pre-selects the date range, the cells' bounding box (padded) and the affected
+    cells, and streams the rows with COPY (spec §16: a world month holds millions); the exact
+    cell membership is then decided in Python with the same rule as processing.grid. Columns are
+    DETECTION_COLUMNS; acq_date is datetime64, `type` nullable Int64.
     """
     frames = []
     with engine.connect() as c:
         for (year, month), group in keys.groupby(["year", "month"]):
             first, last = month_bounds(int(year), int(month))
-            rows = c.execute(text("""
-                SELECT source, product, satellite, latitude, longitude, acq_date, acq_time_raw AS acq_time,
-                       confidence, "type", instrument
-                FROM raw_detections
-                WHERE acq_date BETWEEN :first AND :last AND latitude >= :lat0 AND latitude < :lat1
-                  AND longitude >= :lon0 AND longitude < :lon1"""),
-                {"first": first, "last": last,
-                 "lat0": group.cy.min() * params.cell_deg - _PAD_DEG, "lat1": (group.cy.max() + 1) * params.cell_deg + _PAD_DEG,
-                 "lon0": group.cx.min() * params.cell_deg - _PAD_DEG, "lon1": (group.cx.max() + 1) * params.cell_deg + _PAD_DEG,
-                 }).all()
-            if rows:
-                frames.append(pd.DataFrame(rows, columns=DETECTION_COLUMNS))
+            cells = group[["cy", "cx"]].drop_duplicates()
+            frame = pgcopy.read_frame(c, _DETECTIONS_SQL, {
+                "first": first, "last": last, "deg": params.cell_deg, "code": float(CELL_CODE),
+                "cells": (cells.cy.astype("int64") * CELL_CODE + cells.cx.astype("int64")).astype(float).tolist(),
+                "lat0": group.cy.min() * params.cell_deg - _PAD_DEG, "lat1": (group.cy.max() + 1) * params.cell_deg + _PAD_DEG,
+                "lon0": group.cx.min() * params.cell_deg - _PAD_DEG, "lon1": (group.cx.max() + 1) * params.cell_deg + _PAD_DEG,
+            }, DETECTION_TYPES, nullable_int=("type",))
+            if len(frame):
+                frames.append(frame[_inside_keys(frame, group, params)])
     if not frames:
-        return _detection_frame(pd.DataFrame(columns=DETECTION_COLUMNS))
-    df = pd.concat(frames, ignore_index=True)
-    keyed = with_keys(df, params)
-    inside = keyed[KEY_COLS].merge(keys, on=KEY_COLS, how="left", indicator=True)["_merge"].eq("both").to_numpy()
-    return _detection_frame(df[inside])
+        return _detection_frame(pgcopy.empty_frame(DETECTION_TYPES, nullable_int=("type",)))
+    return _detection_frame(pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0])
+
+
+def _inside_keys(df: pd.DataFrame, keys: pd.DataFrame, params: ProcessingParams) -> np.ndarray:
+    """Rows whose (cy, cx, year, month) by processing.grid's rule (as with_keys computes them) is in keys."""
+    day = pd.to_datetime(df["acq_date"]).dt.normalize()
+    got = pd.DataFrame({"cy": cell_index(df["latitude"], params.cell_deg),
+                        "cx": cell_index(df["longitude"], params.cell_deg),
+                        "year": day.dt.year.astype("int64").to_numpy(), "month": day.dt.month.astype("int64").to_numpy()})
+    want = keys[KEY_COLS].astype("int64").drop_duplicates()
+    return got.merge(want, on=KEY_COLS, how="left", indicator=True)["_merge"].eq("both").to_numpy()
 
 
 def _detection_frame(df: pd.DataFrame) -> pd.DataFrame:
-    out = df[DETECTION_COLUMNS].reset_index(drop=True).copy()
+    out = df[DETECTION_COLUMNS].reset_index(drop=True)
     out["latitude"] = out["latitude"].astype(float)
     out["longitude"] = out["longitude"].astype(float)
-    out["type"] = pd.array([None if pd.isna(v) else int(v) for v in out["type"]], dtype="Int64")
+    out["type"] = out["type"].astype("Int64")
     return out
 
 
@@ -253,7 +294,7 @@ def process_pending(ctx: JobContext, availability: Mapping[str, tuple[date, date
                        "months": step_months(keys)}
             promotion = store.promote(engine, job_id=ctx.job_id, worker_id=ctx.worker_id,
                                       calibration_version_id=cv.id,
-                                      processed=list(zip(pending.id.astype(int), pending.content_hash)),
+                                      processed=pending[["id", "content_hash"]],
                                       summary=summary, now=ctx.now())
             step.summary.update(promotion.to_dict())
     log.info("firms_poll job %s processed: %s", ctx.job_id, status,

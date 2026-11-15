@@ -535,3 +535,49 @@ def test_an_upstream_429_moves_on_to_the_next_model():
     assert [(a["model"], a["outcome"]) for a in out.attempts] == [("a", "rate_limited"), ("b", "ok")]
     assert (out.decision, out.ai_review) == ("approve", "completed")
     assert "reason" not in next(s for s in out.steps if s["name"] == "review")["summary"]
+
+
+def test_world_scale_payloads_stay_small_and_keep_the_gates():
+    """20k affected cell-months world-wide (spec §16): every payload fits REVIEW_SUMMARY_MAX_CHARS
+    untruncated, the validation payload still carries the gates and soft flags, any affected key may
+    be flagged (listed or not), a foreign key may not, and I8 still holds."""
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+
+    import numpy as np
+
+    import processing_synth
+    import world_bench
+    from processing.calibration import Calibration
+    from processing.common import KEY_COLS
+    from processing.grid import with_keys
+    from processing.params import ProcessingParams
+
+    rng = np.random.default_rng(11)
+    raw = world_bench.detections_frame(rng, world_bench.world_cells(rng, 20_000), 200_000,
+                                       {s: 1 for s in world_bench.SOURCES}, 1)
+    dets = processing_synth.frame(raw.assign(type=None)[processing_synth.RAW_COLUMNS].to_dict("records"))
+    keys = with_keys(dets).drop_duplicates(KEY_COLS)[KEY_COLS]
+    assert len(keys) > 15_000
+    cal = Calibration(version="1", k_table=pd.DataFrame(columns=["cy", "cx", "month", "k", "support"]),
+                      k_month={m: 3.0 for m in range(1, 13)}, snpp_end=_date(2026, 11, 2)).with_global_r(0.98, version="1")
+    coverage = [(f, _date(2026, 11, 1), 30) for f in ("MODIS", "NOAA20", "NOAA21")] + [("SNPP", _date(2026, 11, 1), 2)]
+    res = process(dets, keys, cal, mask=None, boundary=None, coverage=coverage,
+                  availability={f: _date(2026, 11, 30) for f in ("MODIS", "NOAA20", "NOAA21", "SNPP")},
+                  now=_dt(2026, 11, 30, 15, tzinfo=_tz.utc), params=ProcessingParams(min_lat=None))
+    cap = Settings().review_summary_max_chars
+    payloads = review_payloads(res, keys, cap)
+    for name, text in payloads.items():
+        assert TRUNCATED not in text and len(text) <= cap, (name, len(text))
+    v = json.loads(payloads["validation"])
+    assert {"gates", "gates_passed", "soft_flags"} <= v.keys() and v["gates_passed"] is True
+    assert v["affected_keys"]["count"] == len(keys) and len(v["affected_keys"]["listed"]) == review.AFFECTED_KEYS_LISTED
+    last = tuple(int(x) for x in keys.sort_values(KEY_COLS).iloc[-1])  # not among the listed ones
+    ok = validate_verdict({"decision": "hold", "reasons": [f"{len(keys)} cell-months are partial"],
+                           "flagged_keys": [last]}, keys, list(payloads.values()))
+    assert ok.flagged_keys == [last]
+    with pytest.raises(InvalidOutput, match="outside the affected set"):
+        validate_verdict({"decision": "hold", "reasons": [], "flagged_keys": [(999, 999, 2026, 11)]}, keys,
+                         list(payloads.values()))
+    with pytest.raises(InvalidOutput, match="I8"):
+        validate_verdict({"decision": "hold", "reasons": ["4242.5 detections look odd"]}, keys,
+                         list(payloads.values()))

@@ -125,3 +125,13 @@ def test_empty_input():
     kept, s = run([])
     assert kept.empty and s.input_rows == 0 and s.kept_rows == 0
     assert all(v == {} for v in s.dropped.values())
+
+
+def test_min_lat_none_is_no_latitude_cut():
+    """The world (spec §16): no 34N cut. The default (34) is unchanged."""
+    rows = [det("MODIS_SP", -33.0, 18.5, "2026-11-01"), det("VIIRS_NOAA20_NRT", 33.99, 9.0, "2026-11-01"),
+            det("VIIRS_NOAA21_NRT", 36.0, 9.0, "2026-11-01")]
+    kept, s = run(rows, params=ProcessingParams(min_lat=None))
+    assert s.kept_rows == 3 and s.dropped["south_of_min_lat"] == {} and s.rules["min_lat"] is None
+    _, default = run(rows)
+    assert default.kept_rows == 1 and default.dropped["south_of_min_lat"] == {"MODIS": 1, "NOAA20": 1}

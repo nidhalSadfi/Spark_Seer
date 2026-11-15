@@ -15,8 +15,9 @@ from firms_tool.sensors import SENSORS
 
 @dataclass(frozen=True)
 class ProcessingParams:
-    # Filters (spec §5; pipeline/ingest.py with min_lat = 34 as the README runs it).
-    min_lat: float = 34.0
+    # Filters (spec §5; pipeline/ingest.py with min_lat = 34 as the README runs it). None = no
+    # latitude cut (the world, spec §16: the static-source mask instead).
+    min_lat: float | None = 34.0
     modis_min_confidence: float = 30.0
     viirs_confidences: tuple[str, ...] = ("n", "h", "nominal", "high")  # compared trimmed, lower case
     sp_keep_type: int = 0  # FIRMS type 0 = presumed vegetation fire

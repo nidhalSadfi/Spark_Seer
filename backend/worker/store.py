@@ -17,9 +17,11 @@ from datetime import date, datetime
 from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
+import pyarrow as pa
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+import pgcopy
 from processing.calibration import Calibration
 from processing.common import REF_MODIS, jsonable
 
@@ -65,11 +67,10 @@ def insert_calibration(c: Connection, cal: Calibration, *, status: str, label: s
          "report": json.dumps(jsonable(dict(validation_report)), sort_keys=True), "now": now,
          "approved_at": now if status == "approved" else None})
     kt = cal.k_table
-    if len(kt):
-        c.execute(text("INSERT INTO calibration_k (calibration_version_id, cy, cx, month, k, support) "
-                       "VALUES (:id, :cy, :cx, :month, :k, :support)"),
-                  [{"id": cal_id, "cy": int(r.cy), "cx": int(r.cx), "month": int(r.month), "k": float(r.k),
-                    "support": float(r.support)} for r in kt.itertuples(index=False)])
+    if len(kt):  # COPY: a world k table has hundreds of thousands of rows (spec §16)
+        pgcopy.write_table(c, "calibration_k", pd.DataFrame({
+            "calibration_version_id": cal_id, "cy": kt.cy.astype("int64"), "cx": kt.cx.astype("int64"),
+            "month": kt.month.astype("int64"), "k": kt.k.astype("float64"), "support": kt.support.astype("float64")}))
     # The fingerprint of the calibration as it reads back (version = id), so load_calibration can verify it.
     stored = _calibration_from_rows(c, cal_id)
     c.execute(text("UPDATE calibration_versions SET fingerprint = :fp WHERE id = :id"),
@@ -79,9 +80,10 @@ def insert_calibration(c: Connection, cal: Calibration, *, status: str, label: s
 
 def _calibration_from_rows(c: Connection, cal_id: int) -> Calibration:
     row = c.execute(text("SELECT * FROM calibration_versions WHERE id = :id"), {"id": cal_id}).one()
-    k = pd.DataFrame(c.execute(text("SELECT cy, cx, month, k, support FROM calibration_k "
-                                    "WHERE calibration_version_id = :id ORDER BY cy, cx, month"),
-                               {"id": cal_id}).all(), columns=["cy", "cx", "month", "k", "support"])
+    k = pgcopy.read_frame(c, "SELECT cy, cx, month, k, support FROM calibration_k "
+                             "WHERE calibration_version_id = %(id)s ORDER BY cy, cx, month", {"id": int(cal_id)},
+                          {"cy": pa.int64(), "cx": pa.int64(), "month": pa.int64(), "k": pa.float64(),
+                           "support": pa.float64()})
     r = {int(m): float(v) for m, v in row.r.items()} if row.r is not None else None
     return Calibration(version=str(cal_id), k_table=k, k_month={int(m): float(v) for m, v in row.k_month.items()},
                        snpp_end=row.snpp_end, r=r, r_global=row.r_global, source=row.k_table_ref)
@@ -144,6 +146,14 @@ def insert_cell_month(c: Connection, rows: Sequence[dict], dataset_version_id: i
     return len(rows)
 
 
+def copy_cell_month(c: Connection, frame: pd.DataFrame, dataset_version_id: int) -> int:
+    """COPY a frame of cell_month rows (CELL_COLUMNS; quality_flags as text[] literals such as "{}")
+    into the approved table: the bootstrap of a world dataset (spec §16), millions of rows."""
+    out = frame[list(CELL_COLUMNS)].copy()
+    out["dataset_version_id"] = int(dataset_version_id)
+    return pgcopy.write_table(c, "cell_month", out)
+
+
 def prune_staging(c: Connection, older_than: datetime) -> int:
     """Retention (§8): drop staging rows of jobs that finished before `older_than`."""
     return c.execute(text("""
@@ -167,12 +177,13 @@ class Promotion:
 
 
 def promote(engine: Engine, *, job_id: int, worker_id: str, calibration_version_id: int,
-            processed: Sequence[tuple[int, str]], summary: Mapping, now: datetime) -> Promotion:
+            processed: Sequence[tuple[int, str]] | pd.DataFrame, summary: Mapping, now: datetime) -> Promotion:
     """Publish job `job_id`'s staging rows in ONE transaction (spec §8); any exception rolls back all.
 
-    `processed`: (raw_detections.id, content_hash) of the pending rows the run was computed from;
-    those still carrying that hash get needs_processing = false. A row modified again since keeps
-    its flag and is processed by the next run.
+    `processed`: (raw_detections.id, content_hash) of the pending rows the run was computed from
+    (pairs, or a frame with columns id and content_hash); those still carrying that hash get
+    needs_processing = false. A row modified again since keeps its flag and is processed by the
+    next run.
     """
     with engine.begin() as c:
         return _promote(c, job_id=job_id, worker_id=worker_id, calibration_version_id=calibration_version_id,
@@ -235,14 +246,21 @@ def _mark_succeeded(c: Connection, job_id: int, version: int, now: datetime) -> 
                    "heartbeat_at = :now WHERE id = :id"), {"id": job_id, "version": version, "now": now})
 
 
-def _clear_pending(c: Connection, processed: Sequence[tuple[int, str]]) -> int:
-    if not processed:
+def _clear_pending(c: Connection, processed: Sequence[tuple[int, str]] | pd.DataFrame) -> int:
+    """needs_processing = false for the (id, content_hash) pairs still unchanged. The pairs go in
+    with COPY (a world run clears millions, spec §16), into a temp table dropped at commit."""
+    frame = processed[["id", "content_hash"]] if isinstance(processed, pd.DataFrame) else \
+        pd.DataFrame(list(processed), columns=["id", "content_hash"])
+    if frame.empty:
         return 0
+    c.execute(text("CREATE TEMP TABLE processed_detections (id bigint NOT NULL, content_hash text NOT NULL) "
+                   "ON COMMIT DROP"))
+    pgcopy.write_table(c, "processed_detections", frame.astype({"id": "int64"}))
+    c.execute(text("ANALYZE processed_detections"))
     return c.execute(text("""
         UPDATE raw_detections AS r SET needs_processing = false
-        FROM unnest(CAST(:ids AS bigint[]), CAST(:hashes AS text[])) AS p(id, content_hash)
-        WHERE r.id = p.id AND r.content_hash = p.content_hash AND r.needs_processing"""),
-        {"ids": [int(i) for i, _ in processed], "hashes": [h for _, h in processed]}).rowcount
+        FROM processed_detections AS p
+        WHERE r.id = p.id AND r.content_hash = p.content_hash AND r.needs_processing""")).rowcount
 
 
 # ----------------------------------------------------------------------------- job records
