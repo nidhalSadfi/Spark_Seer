@@ -10,3 +10,4 @@ data/raw/
 # Fake data from scripts/make_fake_data.py: never commit it.
 data/fake/
 data/cells.parquet
+data/world/
