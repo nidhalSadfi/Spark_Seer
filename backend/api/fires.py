@@ -84,15 +84,27 @@ def live_fires(hours: int, bbox: tuple[float, float, float, float] | None, sourc
                mode: str = "auto") -> dict:
     s = database.settings()
     src = "AND source = ANY(:sources)" if sources else ""
+    src_r = "AND r.source = ANY(:sources)" if sources else ""
     params = {"sources": sources}
     cells, count, resolution, chosen = [], 0, None, "detections"
     with database.read(isolation_level="REPEATABLE READ") as c:
         newest = database.one(c, f"""
             SELECT acq_date, acq_time FROM raw_detections WHERE product = 'NRT' {src}
             ORDER BY acq_date DESC, acq_time DESC LIMIT 1""", **params)
+        # Newest date per source, as GROUP BY source would give it, but as a loose index scan of the
+        # NRT (source, acq_date) index (migration 0004): one probe per source, not a pass over
+        # millions of rows.
         per_source = database.rows(c, f"""
-            SELECT source, max(acq_date) AS max_acq_date FROM raw_detections WHERE product = 'NRT' {src}
-            GROUP BY source ORDER BY source""", **params)
+            WITH RECURSIVE s(source) AS (
+                (SELECT source FROM raw_detections WHERE product = 'NRT' {src} ORDER BY source LIMIT 1)
+                UNION ALL
+                SELECT (SELECT r.source FROM raw_detections AS r
+                        WHERE r.product = 'NRT' AND r.source > s.source {src_r}
+                        ORDER BY r.source LIMIT 1)
+                FROM s WHERE s.source IS NOT NULL)
+            SELECT s.source, (SELECT max(r.acq_date) FROM raw_detections AS r
+                              WHERE r.product = 'NRT' AND r.source = s.source) AS max_acq_date
+            FROM s WHERE s.source IS NOT NULL ORDER BY s.source""", **params)
         snapshot = database.scalar(c, "SELECT max(fetched_at) FROM firms_fetches")
         detections, start, end = [], None, None
         if newest is not None:

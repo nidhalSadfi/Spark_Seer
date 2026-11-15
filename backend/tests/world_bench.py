@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import functools
-import io
 import json
 import os
 import sys
@@ -171,20 +170,12 @@ def detections_frame(rng, cells: np.ndarray, n: int, fetch_ids: dict[str, int], 
     return df[RAW_COLUMNS].reset_index(drop=True)
 
 
-def copy_frame(engine, table: str, df: pd.DataFrame, chunk: int = 500_000) -> None:
-    """COPY a frame into `table` (CSV, empty string = NULL)."""
-    raw = engine.raw_connection()
-    try:
-        cur = raw.cursor()
-        cols = ", ".join(f'"{c}"' for c in df.columns)
-        with cur.copy(f"COPY {table} ({cols}) FROM STDIN WITH (FORMAT csv, NULL '')") as cp:
-            for i in range(0, len(df), chunk):
-                buf = io.StringIO()
-                df.iloc[i:i + chunk].to_csv(buf, header=False, index=False)
-                cp.write(buf.getvalue())
-        raw.commit()
-    finally:
-        raw.close()
+def copy_frame(engine, table: str, df: pd.DataFrame) -> None:
+    """COPY a detections_frame into `table` (its "" type is NULL)."""
+    import pgcopy
+
+    with engine.begin() as c:
+        pgcopy.write_table(c, table, df.assign(type=None))
 
 
 def history_parquet(rng, path: Path, active_cells: np.ndarray, rows: int) -> pd.DataFrame:
@@ -292,6 +283,10 @@ def main(argv=None) -> int:
     ap.add_argument("--cells", type=int, default=20_000)
     ap.add_argument("--history-rows", type=int, default=5_000_000)
     ap.add_argument("--skip", nargs="*", default=[], choices=["bootstrap", "process", "api"])
+    ap.add_argument("--pending", choices=["all", "last-day"], default="all",
+                    help="all: every detection pending (the first world poll, the worst case); last-day: only "
+                         "the 30th's (a 3-hourly poll late in the month: nearly every cell is affected, few rows "
+                         "are cleared)")
     ap.add_argument("--keep", action="store_true", help="keep the schema (prints its name)")
     ap.add_argument("--workdir", type=Path, default=None)
     args = ap.parse_args(argv)
@@ -324,7 +319,10 @@ def main(argv=None) -> int:
         job_id, fetch_ids = seed_jobs_and_fetches(engine)
         with meter.phase("generate_detections"):
             dets = detections_frame(rng, cells, args.detections, fetch_ids, job_id)
+        if args.pending == "last-day":
+            dets["needs_processing"] = np.where(dets["acq_date_raw"] == "2026-11-30", "t", "f")
         out["detections"] = len(dets)
+        out["pending_rows"] = int((dets["needs_processing"] == "t").sum())
         mask_path = work / "mask.json"
         synthetic_mask(rng, dets, mask_path)
 
@@ -406,6 +404,24 @@ def main(argv=None) -> int:
                     for _ in range(5):
                         core.calendar_for_bbox(box, 2001, 2026)
             out["calendar_note"] = "5 calls each, warm cache"
+            from api import fires
+
+            out["fires_live"] = {}
+            for name, box, mode in (("world_auto", None, "auto"), ("africa_bbox", (-18.0, -35.0, 52.0, 18.0), "auto"),
+                                    ("5deg_bbox", (20.0, 0.0, 25.0, 5.0), "auto"),
+                                    ("1deg_bbox", (20.0, 0.0, 21.0, 1.0), "auto")):
+                with meter.phase(f"fires_live_{name}"):
+                    body = fires.live_fires(48, box, [], mode)
+                out["fires_live"][name] = {"mode": body["mode"], "count": body["meta"]["count"],
+                                           "cells": len(body.get("cells", [])), "detections": len(body["detections"]),
+                                           "json_kb": round(len(json.dumps(body, default=str)) / 1024)}
+            with engine.connect() as c:
+                plan = c.execute(text(
+                    "EXPLAIN SELECT count(*) FROM raw_detections WHERE product = 'NRT' AND longitude BETWEEN 20 "
+                    "AND 25 AND latitude BETWEEN 0 AND 5 AND acq_date >= '2026-11-28' AND acq_date <= '2026-11-30' "
+                    "AND (acq_date + acq_time) >= '2026-11-28 23:59' AND (acq_date + acq_time) <= '2026-11-30 23:59'"
+                )).scalars().all()
+                out["fires_live_plan"] = [line.strip() for line in plan[:4]]
             database.reset()
     finally:
         engine.dispose()

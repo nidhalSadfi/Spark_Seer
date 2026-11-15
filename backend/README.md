@@ -199,17 +199,25 @@ response is a 503.
 
 ### `GET /areas`
 
-No parameters. Read from `data/areas.json`, the data person's demo boxes
-(`harmonization-modis-viirs/docs/p1/demo_areas.json`).
+No parameters. Read from `data/areas.json`: first the data person's four North Africa demo boxes
+(`harmonization-modis-viirs/docs/p1/demo_areas.json`, ids unchanged), then 13 well-known world fire
+regions (spec §16). `group` (added) is `north_africa` or `world`.
 
 ```json
 {"areas": [
-  {"id": "bizerte", "name": "Bizerte / NW Tunisia", "bbox": [8.3, 36.0, 9.8, 37.2]},
-  {"id": "kabylie", "name": "Kabylie", "bbox": [3.7, 36.3, 5.2, 37.0]},
-  {"id": "ne_algeria", "name": "NE Algeria", "bbox": [7.0, 36.4, 8.6, 37.0]},
-  {"id": "petite_kabylie", "name": "Petite Kabylie", "bbox": [5.3, 36.4, 6.9, 37.1]}
+  {"id": "bizerte", "name": "Bizerte / NW Tunisia", "bbox": [8.3, 36.0, 9.8, 37.2], "group": "north_africa"},
+  {"id": "kabylie", "name": "Kabylie", "bbox": [3.7, 36.3, 5.2, 37.0], "group": "north_africa"},
+  {"id": "ne_algeria", "name": "NE Algeria", "bbox": [7.0, 36.4, 8.6, 37.0], "group": "north_africa"},
+  {"id": "petite_kabylie", "name": "Petite Kabylie", "bbox": [5.3, 36.4, 6.9, 37.1], "group": "north_africa"},
+  {"id": "amazon_arc", "name": "Amazon arc of deforestation", "bbox": [-66.0, -13.0, -44.0, -3.0], "group": "world"},
+  "..."
 ]}
 ```
+
+World region ids: `amazon_arc`, `cerrado`, `sahel`, `central_african_savanna`, `southern_africa_miombo`,
+`siberia`, `western_us`, `canadian_boreal`, `northern_australia`, `southeast_australia`, `indonesia`,
+`indochina`, `mediterranean_europe`. They are coarse boxes for browsing, not official boundaries;
+none overlaps the North Africa areas. Their calendars need the world dataset (empty otherwise).
 
 `bbox` is `[minLon, minLat, maxLon, maxLat]` in decimal degrees.
 
@@ -478,6 +486,7 @@ whose latest value comes from this version.
 | `hours` | `48` | window length, whole hours 1-168 |
 | `bbox` | none | `minLon,minLat,maxLon,maxLat` (same rules and 400s as `/calendar`) |
 | `source` | all | FIRMS source id(s), e.g. `VIIRS_NOAA20_NRT`, several separated by commas |
+| `mode` | `auto` | `auto`, or `grid` to always get the aggregated grid (spec §16) |
 
 NRT detections from `raw_detections` (never FIRMS itself) whose acquisition time (UTC,
 `acq_date` + `acq_time`) lies in `[end - hours, end]`, where `end` is the newest stored NRT
@@ -509,6 +518,34 @@ empty list, not old fires. 400 for bad `hours`, `bbox` or `source`.
 - `sources`: every stored NRT source (of the filter) with its newest acquisition date, so the map
   can say which satellite is behind.
 - With no stored NRT detection, `snapshot` and the window are null and `detections` is empty.
+- `mode` (added, spec §16) is `"detections"` for the shape above. A world-wide window holds far
+  too many detections for one response, so the answer is `"grid"` instead when the window has more
+  than `FIRES_LIVE_MAX_DETECTIONS` (default 20000) detections, when the bbox is wider or taller
+  than `FIRES_LIVE_GRID_SPAN_DEG` (default 30°), or with `mode=grid`. Without a bbox only the
+  detection cap applies. `meta` gains `resolution` (null for detections), `max_detections`,
+  `grid_span_deg` and `fine_grid_max_span_deg`; in grid mode also `cells` (the number of cells).
+  `meta.count` is always the number of detections in the window.
+
+Grid mode: `detections` is empty and `cells` lists the occupied cells of `resolution` degrees,
+0.25° when the bbox spans at most `FIRES_LIVE_FINE_GRID_MAX_SPAN_DEG` (default 90°), else 0.5° (no
+bbox = the world = 0.5°). A cell is `floor(lat / resolution), floor(lon / resolution)`; `lat`/`lon`
+are its centre; `modis` / `viirs` split `count` by sensor (as `sensor` above); `frp_sum` (2
+decimals) and `frp_max` skip null FRP and are null when every FRP is; `latest` is the newest
+acquisition time in the cell. Cells are ordered south to north, then west to east.
+
+```json
+{"mode": "grid", "snapshot": "2026-11-15T03:31:00Z",
+ "window": {"start": "2026-11-13T00:58:00Z", "end": "2026-11-15T00:58:00Z"},
+ "detections": [],
+ "cells": [
+   {"lat": 30.625, "lon": 0.625, "count": 1, "frp_sum": 3.0, "frp_max": 3.0, "modis": 0, "viirs": 1,
+    "latest": "2026-11-14T12:00:00Z"},
+   {"lat": 36.875, "lon": 9.125, "count": 2, "frp_sum": 19.9, "frp_max": 14.7, "modis": 1, "viirs": 1,
+    "latest": "2026-11-15T00:58:00Z"}],
+ "sources": [{"source": "MODIS_NRT", "max_acq_date": "2026-11-14"}, "..."],
+ "meta": {"count": 3, "product": "NRT", "hours": 48, "bbox": [-10.0, 20.0, 30.0, 45.0], "resolution": 0.25,
+          "max_detections": 20000, "grid_span_deg": 30.0, "fine_grid_max_span_deg": 90.0, "cells": 2}}
+```
 
 #### Community reports: `/reports`
 
@@ -557,6 +594,45 @@ Code that needs the data should use `api/core.py`: `get_data()`, `get_validation
 `get_areas()`, `get_area(id)`, `calendar_for_bbox(bbox, start, end)`. Data loads on first use and
 is cached (from the database or the parquet, see `/calendar`). Database access goes through
 `api/database.py` (`read()` for READ ONLY transactions).
+
+## World coverage (spec §16)
+
+The backend runs for the whole world with these settings (see `.env.example`):
+
+```bash
+FIRMS_BBOX=world              # the FIRMS area API's "world": 18 tiles of 60 degrees
+PROCESSING_MIN_LAT=none       # no 34N cut; the static-source mask instead
+COUNTRY_BOUNDARY_FILE=        # no country clip
+STATIC_MASK_FILE=data/world/static_mask.json   # the world mask the bootstrap recorded (I6)
+```
+
+- **FIRMS budget.** A call costs 2 transactions per day per tile: 36 per day for the world, so a
+  normal 2-day poll of 4 sources is 288 (216 once S-NPP is past its end), against 5000 per 10
+  minutes. A first poll or a catch-up backfills up to `FIRMS_MAX_BACKFILL_DAYS` per source
+  (30 days of 3 sources plus S-NPP's last days: 3888). A poll estimated above 1000 transactions
+  checks the key's budget (`mapkey_status`) before its first call and after every 1000
+  transactions, and waits while the next call would not fit; the planning step records the
+  estimate and `budget`, the storage step how many checks were made. A rate-limited call still
+  waits and retries as before.
+- **Bootstrap / cut-over.** Load the world dataset with explicit paths. With an existing dataset
+  this is a no-op unless `--replace` is given; `--replace` creates a new approved calibration
+  version and a new approved dataset version in one transaction, supersedes (never deletes) the
+  old ones and copies every approved row to `cell_month_history` first. It replaces the North
+  Africa dataset that the running app serves, so it needs the user's approval (spec §16).
+
+  ```bash
+  python -m worker.bootstrap --data data/world/harmonized.parquet \
+      --validation data/world/harmonized_validation.json --inter-viirs data/world/inter_viirs_fit.json \
+      --mask data/world/static_mask.json --replace
+  ```
+- **Scale.** Large reads and writes use COPY (`pgcopy.py`): the pending detections and the
+  detections of the affected cell-months (with a semi-join on the affected cells), the cleared
+  pending flags, the bootstrap's k table and cell-months, the API's approved frame. The numbers
+  are identical to the row-based code (`tests/test_world_scale_pg.py` keeps that code as the
+  oracle). `python tests/world_bench.py` measures a synthetic world month against
+  `TEST_DATABASE_URL` (its own schema, dropped afterwards); measured budget below.
+
+WORLD_BENCH_TABLE
 
 ## Method and limits
 
