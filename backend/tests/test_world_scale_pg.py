@@ -421,3 +421,47 @@ def test_bootstrap_cli_takes_world_paths_and_replace(pg, tmp_path):
     assert "already bootstrapped" in run(b)
     assert "with calibration version 2 and dataset version 2 (3000 cell-months" in run(b, "--replace")
     assert len(db_cell_month(pg.engine)) == 3_000
+
+
+# -- the API's approved frame ---------------------------------------------------------------------
+
+def ref_frame_from_rows(rows):
+    """api/core.py frame_from_rows at 538aa86 (row by row)."""
+    from api.core import FIRST_VIIRS_YEAR, PARQUET_DTYPES
+
+    df = pd.DataFrame(rows, columns=["cy", "cx", "year", "month", "modis", "viirs_ref", "harmonized", "k", "support",
+                                     "modis_days", "viirs_days", "reference", "calibration_version_id",
+                                     "calibration_k_month"])
+    pre = df["year"].astype(int) < FIRST_VIIRS_YEAR
+    num = lambda col: pd.to_numeric(df[col], errors="coerce").astype("float64")  # noqa: E731
+    out = pd.DataFrame({c: df[c].astype(t) for c, t in PARQUET_DTYPES.items()})
+    out["MODIS"] = num("modis")
+    out["VIIRS"] = num("viirs_ref").mask(pre & df["viirs_ref"].isna(), 0.0)
+    out["k"] = num("k")
+    out["k_month"] = [float(km[str(int(m))]) if isinstance(km, dict) and str(int(m)) in km else np.nan
+                      for km, m in zip(df["calibration_k_month"], df["month"])]
+    out["support"] = num("support")
+    out["harmonized"] = num("harmonized")
+    out["source"] = [None if r is None else ("MODIS*k" if r == "MODIS*k" else "VIIRS") for r in df["reference"]]
+    days = {"MODIS_days": num("modis_days"), "VIIRS_days": num("viirs_days").mask(pre & df["viirs_days"].isna(), 0.0)}
+    if len(df) and not any(col.isna().any() for col in days.values()):
+        for name, col in days.items():
+            out[name] = col.astype("int64")
+    return out
+
+
+@pytest.mark.parametrize("days", [True, False])
+def test_api_frame_by_copy_equals_the_row_based_frame(pg, tmp_path, days):
+    from api import core, database
+    from worker.bootstrap import bootstrap
+
+    bootstrap(pg.engine, **world_parquet(tmp_path / "w", rows=30_000, days=days), now=NOW)
+    with pg.engine.begin() as c:  # a promoted near-real-time row: NULL counts, a partial month
+        c.execute(text("UPDATE cell_month SET viirs_ref = NULL, harmonized = NULL, n_snpp = NULL, reference = 'mixed', "
+                       "is_partial = true WHERE (cy, cx, year, month) IN (SELECT cy, cx, year, month FROM cell_month "
+                       "WHERE year >= 2012 ORDER BY cy, cx, year, month LIMIT 5)"))
+    with pg.engine.connect() as c:
+        new = core.frame_from_rows(core.cell_month_frame(c))
+        ref = ref_frame_from_rows(database.rows(c, core.CELL_MONTH_SQL))
+    pd.testing.assert_frame_equal(new, ref, check_exact=True)
+    assert ("MODIS_days" in new) is days and len(new) == 30_000

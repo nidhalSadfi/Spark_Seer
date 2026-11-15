@@ -47,12 +47,32 @@ def test_calendar_by_bbox(client):
     assert not {"low", "high", "MODIS_days", "VIIRS_days"} & body["months"][0].keys()  # never invented
 
 
+NORTH_AFRICA = ["bizerte", "kabylie", "ne_algeria", "petite_kabylie"]
+
+
 def test_areas(client):
     areas = client.get("/areas").json()["areas"]
-    assert [a["id"] for a in areas] == ["bizerte", "kabylie", "ne_algeria", "petite_kabylie"]
+    # The four North Africa areas keep their ids, first; world fire regions follow (spec §16).
+    assert [a["id"] for a in areas][:4] == NORTH_AFRICA
+    assert [a["id"] for a in areas if a["group"] == "north_africa"] == NORTH_AFRICA
+    world = [a for a in areas if a["group"] == "world"]
+    assert 10 <= len(world) <= 15 and len(areas) == 4 + len(world)
+    assert {"amazon_arc", "cerrado", "sahel", "siberia", "western_us", "northern_australia", "indonesia",
+            "mediterranean_europe", "canadian_boreal", "indochina"} <= {a["id"] for a in world}
+    assert len({a["id"] for a in areas}) == len(areas)
     for a in areas:
         x0, y0, x1, y1 = a["bbox"]
-        assert a["name"] and x0 < x1 and y0 < y1
+        assert a["name"] and -180 <= x0 < x1 <= 180 and -90 <= y0 < y1 <= 90
+    # No world region reaches the North Africa areas (point lookups such as /weather take the first match).
+    for w in world:
+        for na in areas[:4]:
+            assert w["bbox"][1] > na["bbox"][3] or w["bbox"][3] < na["bbox"][1] or \
+                w["bbox"][0] > na["bbox"][2] or w["bbox"][2] < na["bbox"][0], (w["id"], na["id"])
+
+
+def test_calendar_for_a_world_region(client):
+    body = client.get("/calendar?area=amazon_arc&start=2008&end=2015").json()
+    assert body == {"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}  # North Africa data
 
 
 def test_calendar_by_area_matches_bbox(client):

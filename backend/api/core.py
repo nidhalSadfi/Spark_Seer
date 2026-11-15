@@ -130,7 +130,7 @@ def _approved() -> tuple[pd.DataFrame | None, dict | None]:
                 elif version == _db_cache["version"] and _db_cache["frame"] is not None:
                     frame, coverage = _db_cache["frame"], _db_cache["coverage"]
                 else:
-                    frame = frame_from_rows(database.rows(c, CELL_MONTH_SQL))
+                    frame = frame_from_rows(cell_month_frame(c))
                     coverage = coverage_from_rows(database.rows(c, COVERAGE_SQL))
                     log.info("calendar data: approved dataset version %s from the database (%d rows)",
                              version, len(frame))
@@ -150,6 +150,35 @@ CELL_MONTH_SQL = """
            m.modis_days, m.viirs_days, m.reference, m.calibration_version_id, c.k_month AS calibration_k_month
     FROM cell_month AS m JOIN calibration_versions AS c ON c.id = m.calibration_version_id
     ORDER BY m.cy, m.cx, m.year, m.month"""
+CELL_MONTH_COLUMNS = ["cy", "cx", "year", "month", "modis", "viirs_ref", "harmonized", "k", "support", "modis_days",
+                      "viirs_days", "reference", "calibration_version_id", "calibration_k_month"]
+
+# CELL_MONTH_SQL without the per-row JSON, streamed with COPY (a world dataset has millions of
+# rows, spec §16); the k_month of each calibration version is read once and shared by its rows.
+_CELL_MONTH_COPY_SQL = """
+    SELECT cy, cx, year, month, modis, viirs_ref, harmonized, k, support, modis_days, viirs_days, reference,
+           calibration_version_id
+    FROM cell_month ORDER BY cy, cx, year, month"""
+
+
+def _cell_month_types():
+    import pyarrow as pa
+
+    return {"cy": pa.int32(), "cx": pa.int32(), "year": pa.int16(), "month": pa.int8(), "modis": pa.float64(),
+            "viirs_ref": pa.float64(), "harmonized": pa.float64(), "k": pa.float64(), "support": pa.float64(),
+            "modis_days": pa.float64(), "viirs_days": pa.float64(), "reference": pa.string(),
+            "calibration_version_id": pa.int64()}
+
+
+def cell_month_frame(conn) -> pd.DataFrame:
+    """CELL_MONTH_SQL's result as a frame (same columns, same order), read with COPY. Counts come
+    as float64 (NULL = NaN); every row's calibration_k_month is its version's k_month dict."""
+    import pgcopy
+
+    df = pgcopy.read_frame(conn, _CELL_MONTH_COPY_SQL, None, _cell_month_types())
+    kms = {int(r["id"]): r["k_month"] for r in database.rows(conn, "SELECT id, k_month FROM calibration_versions")}
+    df["calibration_k_month"] = df["calibration_version_id"].map(kms)
+    return df[CELL_MONTH_COLUMNS]
 
 
 # One row per year-month the approved dataset has at all; partial if any of its rows is partial.
@@ -187,24 +216,43 @@ def frame_from_rows(rows: list[dict]) -> pd.DataFrame:
       them (calibrate.py writes them optionally). A database bootstrapped without them (the real
       one) never gains these /calendar fields, even after runs that store day counts for new rows.
     """
-    df = pd.DataFrame(rows, columns=["cy", "cx", "year", "month", "modis", "viirs_ref", "harmonized", "k", "support",
-                                     "modis_days", "viirs_days", "reference", "calibration_version_id",
-                                     "calibration_k_month"])
-    pre = df["year"].astype(int) < FIRST_VIIRS_YEAR
+    df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows, columns=CELL_MONTH_COLUMNS)
+    pre = (df["year"].astype(int) < FIRST_VIIRS_YEAR).to_numpy()
     num = lambda col: pd.to_numeric(df[col], errors="coerce").astype("float64")  # noqa: E731 - None -> NaN
     out = pd.DataFrame({c: df[c].astype(t) for c, t in PARQUET_DTYPES.items()})
     out["MODIS"] = num("modis")
     out["VIIRS"] = num("viirs_ref").mask(pre & df["viirs_ref"].isna(), 0.0)
     out["k"] = num("k")
-    out["k_month"] = [float(km[str(int(m))]) if isinstance(km, dict) and str(int(m)) in km else np.nan
-                      for km, m in zip(df["calibration_k_month"], df["month"])]
+    out["k_month"] = _k_month(df)
     out["support"] = num("support")
     out["harmonized"] = num("harmonized")
-    out["source"] = [None if r is None else ("MODIS*k" if r == "MODIS*k" else "VIIRS") for r in df["reference"]]
+    ref = df["reference"]
+    out["source"] = np.where(ref.isna(), None, np.where(ref == "MODIS*k", "MODIS*k", "VIIRS")).astype(object)
     days = {"MODIS_days": num("modis_days"), "VIIRS_days": num("viirs_days").mask(pre & df["viirs_days"].isna(), 0.0)}
     if len(df) and not any(col.isna().any() for col in days.values()):
         for name, col in days.items():
             out[name] = col.astype("int64")  # whole counts, like the parquet
+    return out
+
+
+def _k_month(df: pd.DataFrame) -> np.ndarray:
+    """Each row's calibration k_month for its calendar month (NaN where it has none), vectorised:
+    k_month depends only on the calibration version (it is joined from calibration_versions)."""
+    out = np.full(len(df), np.nan)
+    if not len(df):
+        return out
+    month = df["month"].astype("int64").to_numpy()
+    first = df.drop_duplicates("calibration_version_id")
+    for cal_id, km in zip(first["calibration_version_id"], first["calibration_k_month"]):
+        if not isinstance(km, dict):
+            continue
+        rows = (df["calibration_version_id"] == cal_id).to_numpy()
+        table = np.full(13, np.nan)
+        for m in range(1, 13):
+            if str(m) in km:
+                table[m] = float(km[str(m)])
+        valid = rows & (month >= 1) & (month <= 12)
+        out[valid] = table[month[valid]]
     return out
 
 
@@ -246,6 +294,22 @@ def _year(value) -> int:
     return int(str(value)[:4])
 
 
+def select_bbox(H: pd.DataFrame, bbox: tuple[float, float, float, float], start: int, end: int) -> pd.DataFrame:
+    """Rows of H whose cell is in the bbox (cell rule floor(deg / CELL_DEG)) and year in start..end,
+    in H's order. When H is sorted by cy (the database frame is), only the cy range is scanned: a
+    world-wide frame has millions of rows (spec §16), a small bbox a few hundred."""
+    x0, y0, x1, y1 = bbox
+    cx0, cx1 = int(np.floor(x0 / CELL_DEG)), int(np.floor(x1 / CELL_DEG))
+    cy0, cy1 = int(np.floor(y0 / CELL_DEG)), int(np.floor(y1 / CELL_DEG))
+    part = H
+    cy = H["cy"]
+    if len(H) and cy.is_monotonic_increasing:
+        values = cy.to_numpy()
+        part = H.iloc[np.searchsorted(values, cy0, "left"):np.searchsorted(values, cy1, "right")]
+    return part[(part.cx >= cx0) & (part.cx <= cx1) & (part.cy >= cy0) & (part.cy <= cy1)
+                & part.year.between(start, end)]
+
+
 def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int | str, end: int | str) -> dict:
     """Monthly harmonized calendar for a bbox (minLon, minLat, maxLon, maxLat), years start..end.
 
@@ -256,10 +320,7 @@ def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int | str,
     """
     H, coverage = _data_and_coverage()
     start, end = _year(start), _year(end)
-    x0, y0, x1, y1 = bbox
-    sel = H[(H.cx >= int(np.floor(x0 / CELL_DEG))) & (H.cx <= int(np.floor(x1 / CELL_DEG)))
-            & (H.cy >= int(np.floor(y0 / CELL_DEG))) & (H.cy <= int(np.floor(y1 / CELL_DEG)))
-            & H.year.between(start, end)]
+    sel = select_bbox(H, bbox, start, end)
     if sel.empty:
         return {"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}
 

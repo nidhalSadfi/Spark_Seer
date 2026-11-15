@@ -184,8 +184,21 @@ class ApiSettings:
     api_db_connect_timeout_s: int = 3
     # When set, PATCH and DELETE /reports need it in the X-Admin-Token header (spec §10).
     reports_admin_token: str | None = field(default=None, repr=False)
+    # GET /fires/live (spec §16): above this many detections in the window, or for a bbox wider
+    # (or taller) than FIRES_LIVE_GRID_SPAN_DEG, the answer is an aggregated grid instead of the
+    # detections; the grid is 0.25° up to FIRES_LIVE_FINE_GRID_MAX_SPAN_DEG of span, 0.5° beyond.
+    fires_live_max_detections: int = 20000
+    fires_live_grid_span_deg: float = 30.0
+    fires_live_fine_grid_max_span_deg: float = 90.0
 
     def __post_init__(self) -> None:
+        _check(self.fires_live_max_detections >= 1, "FIRES_LIVE_MAX_DETECTIONS", "must be an integer >= 1",
+               self.fires_live_max_detections)
+        _check(0 < self.fires_live_grid_span_deg <= 360 and math.isfinite(self.fires_live_grid_span_deg),
+               "FIRES_LIVE_GRID_SPAN_DEG", "must be a number of degrees > 0 and <= 360", self.fires_live_grid_span_deg)
+        _check(0 < self.fires_live_fine_grid_max_span_deg <= 360
+               and math.isfinite(self.fires_live_fine_grid_max_span_deg), "FIRES_LIVE_FINE_GRID_MAX_SPAN_DEG",
+               "must be a number of degrees > 0 and <= 360", self.fires_live_fine_grid_max_span_deg)
         _check(self.api_version_check_s >= 0 and math.isfinite(self.api_version_check_s), "API_VERSION_CHECK_S",
                "must be a number >= 0", self.api_version_check_s)
         _check(1 <= self.api_db_connect_timeout_s <= 60, "API_DB_CONNECT_TIMEOUT_S", "must be an integer from 1 to 60",
@@ -198,6 +211,12 @@ class ApiSettings:
             kw["api_version_check_s"] = _number("API_VERSION_CHECK_S", v, float)
         if (v := _get("API_DB_CONNECT_TIMEOUT_S")) is not None:
             kw["api_db_connect_timeout_s"] = _number("API_DB_CONNECT_TIMEOUT_S", v, int)
+        if (v := _get("FIRES_LIVE_MAX_DETECTIONS")) is not None:
+            kw["fires_live_max_detections"] = _number("FIRES_LIVE_MAX_DETECTIONS", v, int)
+        if (v := _get("FIRES_LIVE_GRID_SPAN_DEG")) is not None:
+            kw["fires_live_grid_span_deg"] = _number("FIRES_LIVE_GRID_SPAN_DEG", v, float)
+        if (v := _get("FIRES_LIVE_FINE_GRID_MAX_SPAN_DEG")) is not None:
+            kw["fires_live_fine_grid_max_span_deg"] = _number("FIRES_LIVE_FINE_GRID_MAX_SPAN_DEG", v, float)
         return cls(**kw)
 
 

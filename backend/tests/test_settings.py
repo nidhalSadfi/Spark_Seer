@@ -48,8 +48,9 @@ def test_default_bbox_costs_one_firms_tile():
 def test_default_bbox_contains_every_demo_area():
     w, s, e, n = DEFAULT_REGION_BBOX
     areas = json.loads((Path(__file__).resolve().parent.parent / "data" / "areas.json").read_text())
-    assert areas and all(w <= a["bbox"][0] and s <= a["bbox"][1] and e >= a["bbox"][2] and n >= a["bbox"][3]
-                         for a in areas)
+    areas = [a for a in areas if a["group"] == "north_africa"]  # the world regions need FIRMS_BBOX=world
+    assert len(areas) == 4 and all(w <= a["bbox"][0] and s <= a["bbox"][1] and e >= a["bbox"][2]
+                                   and n >= a["bbox"][3] for a in areas)
 
 
 def test_env_overrides(monkeypatch):
