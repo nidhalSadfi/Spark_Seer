@@ -1,0 +1,177 @@
+/* The agent graph, drawn the way Hairline draws its figures (@lucasmarkes/hairline): isometric plates
+   filled with the plate colour and painted back to front, hairline strokes in four tiers, dashed links
+   that turn solid, tiles that rise. It reads Hairline's own custom properties, so it follows the same
+   palette as the landing page's figures (--hairline-plate / -hi / -edge / -mid / -lo / -stroke). */
+
+.ag {
+  --ag-plate: var(--hairline-plate, #0c1423);
+  --ag-hi: var(--hairline-hi, #fde68a);
+  --ag-edge: var(--hairline-edge, #fb923c);
+  --ag-mid: var(--hairline-mid, #5d6f89);
+  --ag-lo: var(--hairline-lo, #26364d);
+  --ag-sw: var(--hairline-stroke, 1);
+  --ag-ease: cubic-bezier(0.5, 0, 0.1, 1); /* Hairline's easing */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ag svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* the drawing: every plate is filled with the plate colour, so what is behind it is hidden */
+.ag :where(path, ellipse) {
+  fill: var(--ag-plate);
+  stroke: var(--ag-mid);
+  stroke-width: var(--ag-sw);
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  transition:
+    stroke 260ms var(--ag-ease),
+    fill 260ms var(--ag-ease);
+}
+.ag .nf {
+  fill: none;
+}
+
+/* a tile rises on its own plate and leaves its footprint behind */
+.ag .node {
+  cursor: pointer;
+  outline: none;
+}
+.ag .lift {
+  transition: transform 420ms var(--ag-ease);
+}
+.ag .ghost {
+  stroke: var(--ag-lo);
+  opacity: 0;
+  transition: opacity 260ms var(--ag-ease);
+}
+.ag .node.up .ghost {
+  opacity: 1;
+}
+
+/* strokes by state: idle is quiet, running is lit, done keeps the edge colour */
+.ag .st-ok .top,
+.ag .st-ok .chip {
+  stroke: var(--ag-edge);
+}
+.ag .st-running .top,
+.ag .st-running .chip {
+  stroke: var(--ag-hi);
+}
+.ag .st-running .side {
+  stroke: var(--ag-edge);
+}
+.ag .st-error .top,
+.ag .st-error .side,
+.ag .st-error .chip {
+  stroke: #ef4444;
+}
+.ag .st-warn .top,
+.ag .st-warn .chip {
+  stroke: #facc15;
+}
+.ag .st-skipped .top,
+.ag .st-skipped .side {
+  stroke: var(--ag-lo);
+  stroke-dasharray: 2 3;
+}
+.ag .node:hover .top,
+.ag .node:focus-visible .top,
+.ag .node.sel .top {
+  stroke: var(--ag-hi);
+}
+.ag .node.sel .top,
+.ag .node:focus-visible .top {
+  stroke-width: calc(var(--ag-sw) * 1.9);
+}
+
+/* the LED on top of each tile */
+.ag .led {
+  stroke: none;
+  fill: var(--ag-lo);
+}
+.ag .st-ok .led {
+  fill: #22c55e;
+}
+.ag .st-running .led {
+  fill: var(--ag-edge);
+}
+.ag .st-error .led {
+  fill: #ef4444;
+}
+.ag .st-warn .led {
+  fill: #facc15;
+}
+.ag .pulse {
+  stroke: var(--ag-edge);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ag-pulse 1.8s ease-out infinite;
+}
+@keyframes ag-pulse {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+/* links: dashed while nothing flows, solid once data has, lit while it does */
+.ag .lk {
+  fill: none;
+  stroke: var(--ag-lo);
+  stroke-dasharray: 1 4;
+}
+.ag .lk-done {
+  stroke: var(--ag-mid);
+  stroke-dasharray: none;
+}
+.ag .lk-live,
+.ag .lk.hot {
+  stroke: var(--ag-hi);
+  stroke-dasharray: none;
+}
+.ag .pkt {
+  fill: var(--ag-hi);
+  stroke: none;
+}
+
+/* labels */
+.ag .lbl,
+.ag .bdg {
+  stroke: none;
+  text-anchor: middle;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  transition: fill 260ms var(--ag-ease);
+}
+.ag .lbl {
+  fill: var(--ag-mid);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ag .bdg {
+  fill: var(--ag-mid);
+  font-size: 9px;
+}
+.ag .st-ok .lbl,
+.ag .st-running .lbl,
+.ag .node:hover .lbl,
+.ag .node.sel .lbl {
+  fill: var(--ag-hi);
+}
+.ag .st-error .lbl {
+  fill: #fca5a5;
+}
+.ag .st-skipped .lbl {
+  fill: var(--ag-lo);
+}

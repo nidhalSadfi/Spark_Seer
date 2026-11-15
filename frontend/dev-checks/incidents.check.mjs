@@ -4,6 +4,8 @@
 // Run from frontend/:  node dev-checks/incidents.check.mjs
 import assert from 'node:assert/strict'
 import {
+  AGENT_KEYS,
+  diagnoseAgents,
   isApproximate,
   leadWords,
   matchLine,
@@ -154,6 +156,29 @@ check('satellite match line and approximate-location flag', () => {
   assert.equal(isApproximate(ticketFromApi(raw({ precision: 'city', radius_km: 40 }))), true)
   assert.equal(statusInfo('Satellite overlap').tone, 'ok')
   assert.equal(statusInfo('something new').tone, 'neutral')
+})
+
+check('why the agents do not answer, in plain words: no address, port, command or setting on the page', () => {
+  const ok = { autostart: true, running: false, gave_up: false, last_error: 'the agents exited with code 3', url: 'http://127.0.0.1:8765' }
+  const cases = {
+    'backend-down': { error: Object.assign(new Error('no response'), { status: 0 }) },
+    'not-started': { error: Object.assign(new Error('Not Found'), { status: 404 }) }, // a backend that does not start them
+    'turned-off': { status: { ...ok, autostart: false } },
+    'gave-up': { status: { ...ok, gave_up: true } },
+    starting: { status: ok },
+    unreachable: { status: { ...ok, running: true } },
+  }
+  for (const [kind, input] of Object.entries(cases)) {
+    const d = diagnoseAgents(input)
+    assert.equal(d.kind, kind)
+    assert.ok(d.title && d.body, kind)
+    const text = `${d.title} ${d.body}`
+    assert.doesNotMatch(text, /localhost|127\.0\.0\.1|:\d{2,5}\b|\bport\b|VITE_|INCIDENT_|\.env|uvicorn|python|cd |CORS|exited with code/i, kind)
+    assert.deepEqual(Object.keys(d).sort(), ['body', 'kind', 'title'], kind)
+  }
+  assert.equal(diagnoseAgents({}).kind, 'not-started')
+  assert.equal(diagnoseAgents({ error: Object.assign(new Error('x'), { status: 500 }) }).kind, 'backend-down')
+  assert.deepEqual(AGENT_KEYS.filter((k) => k.required).map((k) => k.id), ['groq'])
 })
 
 console.log(`\n${n} checks passed`)

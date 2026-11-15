@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import {
@@ -9,22 +10,25 @@ import {
   ExternalLink,
   Flame,
   History,
+  LoaderCircle,
   MapPinPlus,
   Newspaper,
   Quote,
   Radio,
   RefreshCw,
   Satellite,
-  TerminalSquare,
 } from 'lucide-react'
 import { Badge, Notice, PageHeader, Skeleton } from '../components/ui/primitives'
 import ReportMiniMap from '../components/reports/ReportMiniMap'
 import { notifyReportError } from '../components/reports/notifyError'
-import { useIncidentTickets } from '../hooks/useIncidents'
+import AgentConsole from '../components/social/AgentConsole'
+import { useBackendIncidents, useIncidentEvents, useIncidentTickets } from '../hooks/useIncidents'
+import { useNow } from '../hooks/useNow'
 import { useReports } from '../hooks/useReports'
-import { INCIDENTS_BASE } from '../services/incidentsApi'
+import { flowFromEvents, latestRunId, runIsActive } from '../utils/agentFlow'
 import {
   categoryLabel,
+  diagnoseAgents,
   isApproximate,
   leadWords,
   matchLine,
@@ -309,30 +313,30 @@ function TicketDetail({ ticket, report, saving, blocked, onReport }) {
   )
 }
 
-/** Shown when the incident agents service does not answer (it runs on the user's machine and may not be started). */
-function Offline({ error, onRetry, retrying }) {
+/**
+ * Shown when the incident agents do not answer. The backend starts them, so it is asked what it knows
+ * (GET /incidents/status) and the panel says, in plain words, what is going on. The page keeps looking by itself.
+ */
+function Offline({ onRetry, retrying }) {
+  const backend = useBackendIncidents()
+  const d = backend.isPending
+    ? { kind: 'checking', title: 'Looking for the social media agents…', body: null }
+    : diagnoseAgents({ status: backend.data, error: backend.error })
+  const busy = d.kind === 'checking' || d.kind === 'starting'
+
   return (
-    <div className={`${panel} flex flex-col items-center gap-3 px-6 py-12 text-center`}>
+    <div className={`${panel} flex flex-col items-center gap-3 px-6 py-12 text-center`} role="status">
       <span className="grid size-12 place-items-center rounded-xl bg-line/60 text-faint">
-        <TerminalSquare className="size-6" aria-hidden />
+        {busy ? <LoaderCircle className="size-6 animate-spin" aria-hidden /> : <Radio className="size-6" aria-hidden />}
       </span>
-      <h2 className="text-base font-semibold text-ink">The incident agents are not running</h2>
-      <p className="max-w-xl text-sm text-muted">
-        This page shows the fires that the incident agents find in public posts and news. They are a separate local service, expected at{' '}
-        <b className="font-mono text-ink">{INCIDENTS_BASE}</b>. Start them, then try again:
-      </p>
-      <pre className="max-w-full overflow-x-auto rounded-lg border border-line bg-sidebar px-4 py-3 text-left font-mono text-xs leading-relaxed text-ink">
-        {'cd backend/harmonization-modis-viirs\npython -m incident_agents serve'}
-      </pre>
-      <p className="max-w-xl text-xs text-faint">
-        They need the social-media keys in that folder&apos;s <span className="font-mono">.env</span> (see its README). If they run on another
-        address, set <span className="font-mono">VITE_INCIDENTS_URL</span>. If this dashboard is not served from localhost:5173, add its address to{' '}
-        <span className="font-mono">INCIDENT_CORS_ORIGINS</span>.
-        {error?.message ? ` (${error.message})` : ''}
-      </p>
+      <h2 className="text-base font-semibold text-ink">{d.title}</h2>
+      {d.body && <p className="max-w-xl text-sm text-muted">{d.body}</p>}
       <button
         type="button"
-        onClick={onRetry}
+        onClick={() => {
+          backend.refetch()
+          onRetry()
+        }}
         disabled={retrying}
         className="inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-sm text-ink hover:border-fire/40 disabled:opacity-60"
       >
@@ -351,6 +355,46 @@ export default function SocialAlertsPage() {
   const { data: tickets, error, isPending, isFetching, refetch } = useIncidentTickets()
   const { reports, addReport, source: reportsSource, error: reportsError } = useReports()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+
+  // Alerts (the tickets) or Agents (the console); the tab is in the URL so it can be linked
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') === 'agents' ? 'agents' : 'alerts'
+  const setTab = (t) => setParams(t === 'agents' ? { tab: 'agents' } : {}, { replace: true })
+
+  // The agents' live step events. They keep the tickets and runs fresh while the agents work, and
+  // say when a run finishes. The server replays its latest events on connect, so only events from
+  // the last half minute count as news.
+  const refresh = useRef({ timer: null, told: new Set() })
+  const onEvent = (e) => {
+    const r = refresh.current
+    const ticketStep = ['ticket', 'satellite', 'history', 'lead'].includes(e.step)
+    const runEnd = e.step === 'run' && (e.status === 'done' || e.status === 'error')
+    if (ticketStep || runEnd || (e.step === 'run' && e.status === 'started')) {
+      clearTimeout(r.timer) // a burst of events becomes one refresh
+      r.timer = setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['incident-tickets'] })
+        qc.invalidateQueries({ queryKey: ['incident-runs'] })
+      }, 600)
+    }
+    const news = Date.now() - Date.parse(e.ts) < 30_000
+    if (runEnd && news && !r.told.has(e.id)) {
+      r.told.add(e.id)
+      if (e.status === 'done') {
+        toast.success(`Run #${e.run_id} finished: ${e.message}`, { action: { label: 'See the alerts', onClick: () => setTab('alerts') } })
+      } else {
+        toast.error(`Run #${e.run_id} failed: ${e.message}`)
+      }
+    }
+  }
+  const { events, state: streamState } = useIncidentEvents({ enabled: Boolean(tickets) && !error, onEvent })
+  // the live stream dropping usually means the agents (or the backend) just went away: check at once
+  // instead of waiting for the next refresh, so the page says what is wrong within seconds
+  useEffect(() => {
+    if (streamState === 'error') refetch()
+  }, [streamState, refetch])
+  const now = useNow()
+  const agentsBusy = runIsActive(flowFromEvents(events, latestRunId(events)), now)
 
   // Reporting waits until the existing reports are known: that is what tells "already reported" apart
   // (so nothing is filed twice) and where a new report is saved (the server or this browser).
@@ -369,7 +413,7 @@ export default function SocialAlertsPage() {
   const todo = reportsReady ? shown.filter((t) => t.hasLocation && !reportOf(t, reports)) : []
   const batch = todo.slice(0, BULK_MAX)
 
-  const where = reportsSource === 'local' ? ' It is saved in this browser only: the reports server is unreachable.' : ''
+  const where = reportsSource === 'local' ? ' It is saved in this browser only for now, because the shared report list is not available.' : ''
 
   const report = async (ticket) => {
     if (saving || !reportsReady || reportOf(ticket, reports)) return
@@ -412,26 +456,16 @@ export default function SocialAlertsPage() {
       <PageHeader
         kicker="Social detection"
         title="Social Alerts"
-        description="Fires mentioned in public posts and news (Bluesky, X, GDELT, Kanari signals), checked against satellite detections. Report one to send it to the review queue, where it shows as a ? on the map until someone confirms it."
+        description="Fires mentioned in public posts and news (Bluesky, X, GDELT, Kanari signals), checked against satellite detections. Report one to send it to the review queue, where it shows as a ? on the map until someone confirms it. Run the agents yourself from the Agents tab."
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={INCIDENTS_BASE}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-sm text-muted transition-colors hover:border-fire/40 hover:text-ink"
-            >
-              <TerminalSquare className="size-4" aria-hidden /> Agents console <ExternalLink className="size-3.5" aria-hidden />
-            </a>
-            <button
-              type="button"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-sm text-muted transition-colors hover:border-fire/40 hover:text-ink disabled:opacity-60"
-            >
-              <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} aria-hidden /> Refresh
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-sm text-muted transition-colors hover:border-fire/40 hover:text-ink disabled:opacity-60"
+          >
+            <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} aria-hidden /> Refresh
+          </button>
         }
       />
 
@@ -442,13 +476,44 @@ export default function SocialAlertsPage() {
         </Notice>
       </div>
 
+      <div role="tablist" aria-label="Social Alerts sections" className="mb-4 inline-flex gap-1 rounded-xl border border-line bg-sidebar/70 p-1">
+        {[
+          ['alerts', 'Alerts', tickets ? tickets.length : null],
+          ['agents', 'Agents', null],
+        ].map(([id, label, count]) => (
+          <button
+            key={id}
+            role="tab"
+            type="button"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${tab === id ? 'text-orange-200' : 'text-muted hover:text-ink'}`}
+          >
+            {tab === id && (
+              <motion.span
+                layoutId="social-section"
+                className="absolute inset-0 rounded-lg border border-fire/30 bg-fire/15"
+                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+              />
+            )}
+            <span className="relative">{label}</span>
+            {count != null && <span className="relative tabular-nums text-xs opacity-70">{count}</span>}
+            {id === 'agents' && agentsBusy && (
+              <span className="relative size-2 rounded-full bg-fire motion-safe:animate-pulse" role="img" aria-label="A run is in progress" />
+            )}
+          </button>
+        ))}
+      </div>
+
       {isPending ? (
         <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]" aria-busy>
           <Skeleton className="h-96" />
           <Skeleton className="h-96" />
         </div>
       ) : error ? (
-        <Offline error={error} onRetry={() => refetch()} retrying={isFetching} />
+        <Offline onRetry={() => refetch()} retrying={isFetching} />
+      ) : tab === 'agents' ? (
+        <AgentConsole events={events} streamState={streamState} />
       ) : all.length === 0 ? (
         <div className={`${panel} flex flex-col items-center gap-3 px-6 py-16 text-center`}>
           <span className="grid size-12 place-items-center rounded-xl bg-line/60 text-faint">
@@ -456,12 +521,12 @@ export default function SocialAlertsPage() {
           </span>
           <h2 className="text-base font-semibold text-ink">No incidents yet</h2>
           <p className="max-w-md text-sm text-muted">
-            The agents are running but have not found anything yet. Run a search for a country or zone in the agents console and the tickets will
+            The agents are running but have not found anything yet. Run a search for a country or zone on the Agents tab and the tickets will
             appear here.
           </p>
-          <a href={INCIDENTS_BASE} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-orange-200 hover:underline">
-            Open the agents console <ExternalLink className="size-4" aria-hidden />
-          </a>
+          <button type="button" onClick={() => setTab('agents')} className="inline-flex items-center gap-1 text-sm font-medium text-orange-200 hover:underline">
+            Open the Agents tab <ArrowUpRight className="size-4" aria-hidden />
+          </button>
         </div>
       ) : (
         <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">

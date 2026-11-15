@@ -180,3 +180,64 @@ export function matchLine(m) {
   const km = typeof m.km === 'number' ? ` · ${m.km} km` : ''
   return `${what}${km}`
 }
+
+// ───────────────────────── why the agents do not answer ─────────────────────────
+
+/**
+ * What to tell people when the agents do not answer, from what the backend says about them
+ * (GET /incidents/status on the main API) and the error from asking it. Plain language only: setup
+ * details (commands, addresses, settings) belong in the README, not on the page.
+ *   status  that response, or undefined while unknown;  error  the failure of asking the backend, if any
+ * Returns { kind, title, body }.
+ */
+export function diagnoseAgents({ status, error }) {
+  if (error && error.status !== 404) {
+    return {
+      kind: 'backend-down',
+      title: 'Social alerts are offline',
+      body: 'The data service is not responding, so the social media agents cannot be reached. This page reconnects by itself as soon as it is back.',
+    }
+  }
+  if (error || !status) {
+    // a 404: a backend that does not start the agents
+    return {
+      kind: 'not-started',
+      title: 'The social media agents are not running',
+      body: 'They have not been started on this system. This page connects to them by itself once they are.',
+    }
+  }
+  if (!status.autostart) {
+    return {
+      kind: 'turned-off',
+      title: 'The social media agents are turned off',
+      body: 'They are not started on this system. Ask whoever runs this dashboard to turn them on.',
+    }
+  }
+  if (status.gave_up) {
+    return {
+      kind: 'gave-up',
+      title: 'The social media agents keep stopping',
+      body: 'They were restarted several times and stopped each time, so they are paused for now. Ask whoever runs this dashboard to check them.',
+    }
+  }
+  if (!status.running) {
+    return {
+      kind: 'starting',
+      title: 'Starting the social media agents…',
+      body: 'This takes a few seconds. The page refreshes by itself.',
+    }
+  }
+  return {
+    kind: 'unreachable',
+    title: 'The social media agents are running, but this page cannot reach them',
+    body: 'This dashboard is not set up to talk to them yet. Ask whoever runs it to check its settings.',
+  }
+}
+
+/** The keys the agents need, with what happens without each. `status` is GET /api/status of the agents. */
+export const AGENT_KEYS = [
+  { id: 'groq', label: 'Groq model', required: true, without: 'No search can run without it.' },
+  { id: 'x', label: 'X search', required: false, without: 'X is skipped.' },
+  { id: 'bluesky', label: 'Bluesky search', required: false, without: 'Bluesky is skipped.' },
+  { id: 'firms', label: 'NASA FIRMS', required: false, without: 'The FIRMS satellite check is skipped (Kanari is still used).' },
+]
