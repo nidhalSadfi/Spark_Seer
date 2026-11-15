@@ -148,11 +148,13 @@ Notes:
 ## API
 
 Base URL: `http://localhost:8000` locally, `https://<service>.onrender.com` on Render. All core
-endpoints are `GET` and return JSON. CORS allows any origin for `GET` and `POST`. FastAPI serves
-interactive docs at `/docs`.
+endpoints are `GET` and return JSON; only `/reports` also takes `POST`, `PATCH` and `DELETE`. CORS
+allows any origin for `GET`, `POST`, `PATCH` and `DELETE`, with any request header (the reports
+page sends `X-Admin-Token`). FastAPI serves interactive docs at `/docs`.
 
 Errors return `{"detail": "..."}`: **400** for bad parameters, **503** when a data file is missing
-(the message names the file).
+(the message names the file) or when an endpoint needs the database and none is usable (see
+[Database-backed endpoints](#database-backed-endpoints)).
 
 Contract: the front end builds against `web/mock_calendar.json`. Existing fields are never renamed
 or removed, only added to. Example values below are real (the committed data) unless marked.
@@ -163,6 +165,12 @@ or removed, only added to. Example values below are real (the committed data) un
 | `GET /areas` | Named demo areas (ids for `/calendar?area=`) |
 | `GET /calendar` | Monthly harmonized burning-activity calendar for a bbox or an area |
 | `GET /validation` | Held-out validation report of the MODIS->VIIRS harmonization |
+| `GET /processing/status` | Scheduler state per job kind, approved dataset and calibration versions, last error (database) |
+| `GET /processing/jobs` | Processing jobs, newest first, paginated, filterable by kind and status (database) |
+| `GET /processing/jobs/<id>` | One job: counts, steps, gates, soft flags, decision, verdict, LLM attempts (database) |
+| `GET /processing/datasets` | Dataset version history and calibration versions (database) |
+| `GET /fires/live` | Stored NRT FIRMS detections of the last hours, for the fire map (database) |
+| `GET/POST /reports`, `PATCH/DELETE /reports/<id>` | Community fire reports (database) |
 | `POST /investigate` | Evidence Passport for one area and month (`api/passport.py`, teammate) |
 | `GET /weather?area=<id>` or `?lat=&lon=` | 3-day Open-Meteo weather context plus historical context, for a named area or any point (`api/weather.py`, teammate) |
 | `GET /meteomatics/weather?area=<id>` | Meteomatics 72 h forecast at a named point (`meteomatics-weather/`, teammate) |
@@ -177,11 +185,14 @@ or removed, only added to. Example values below are real (the committed data) un
 No parameters.
 
 ```json
-{"status": "ok", "data_file": "data/harmonized.parquet", "rows": 13070}
+{"status": "ok", "data_file": "data/harmonized.parquet", "rows": 13070,
+ "data_source": "parquet", "dataset_version_id": null}
 ```
 
-`rows` counts the rows in `harmonized.parquet` (cell x month with detections). If the file is
-missing the response is a 503.
+`rows` counts the rows of the table `/calendar` uses (cell x month with detections).
+`data_source` says where that table comes from: `"database"` (the approved `cell_month` table;
+`dataset_version_id` is the approved version) or `"parquet"` (`data_file`; `dataset_version_id`
+null). If the parquet is needed and missing the response is a 503.
 
 ### `GET /areas`
 
@@ -247,6 +258,21 @@ the Kabylie fires).
 - An area with no detections returns
   `{"months": [], "meta": {"cells": 0, "note": "no detections in this area"}}`.
 
+Data source: with `DATABASE_URL` set and an approved dataset version in the database, the table
+behind `/calendar` is the approved `cell_month` table (spec §10), cached per approved
+`dataset_version_id`; the version is re-checked at most every `API_VERSION_CHECK_S` seconds
+(default 30), so a newly promoted version shows up within that time. Without a usable database
+(unset, unreachable, not bootstrapped) it is the parquet file, exactly as before. The fields and
+the maths are the same either way:
+
+- The database stores VIIRS as NULL before 2012 (the sensor did not exist); `viirs_raw` stays `0`
+  for those months, as with the parquet.
+- Optional `MODIS_days` / `VIIRS_days` come from the database only when every stored row has them
+  (that is, when the bootstrapped parquet had them); `low` / `high` are not stored in the database.
+- With the database, years after the parquet (e.g. 2026 from the 3-hour job) are available with
+  `end=2026`; the default `end=2025` gives the same response as the parquet. Months the database
+  holds as unknown (NULL, spec I7) are summed as 0, like empty months.
+
 `web/mock_calendar.json` is **synthetic** data for UI work only. Never show it as real results.
 
 ### `GET /validation`
@@ -267,6 +293,238 @@ held-out test years, compared at region x month level.
 - `series` (per-month detail) is included **only if** the file contains one. `calibrate.py`
   does not write it today. `/calendar`'s `meta.validation` always leaves `series` out.
 
+### Database-backed endpoints
+
+`/processing/*`, `/fires/live` and `/reports` read PostgreSQL (spec §10). The examples below are
+abridged (`"..."`) and come from the local database on 2026-11-15 (real NRT detections, jobs and
+review), except the report, which is made up. The API connects lazily
+to `DATABASE_URL` on first use, with a short connect timeout (`API_DB_CONNECT_TIMEOUT_S`, default
+3 s). When `DATABASE_URL` is unset, the server is unreachable or the schema is not migrated, these
+endpoints answer **503** with a `detail` that says which (`database not configured: ...`,
+`database unavailable at <url with the password masked>: ...`, `database schema is not up to
+date ...; run alembic upgrade head`), and the calendar endpoints keep working from the parquet.
+
+The API process never imports `worker`, `crewai` or an LLM client (invariant I1, tested in a fresh
+interpreter after serving every endpoint). Every GET runs in a `READ ONLY` transaction, so it
+cannot write; only the `/reports` writes use a read-write transaction, and they touch
+`community_reports` only. Timestamps are ISO 8601 UTC with a `Z`
+(`2026-11-15T03:31:06.622Z`; milliseconds only when non-zero); dates are `YYYY-MM-DD`.
+
+Configuration (all optional; see `.env.example`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATABASE_URL` | unset | PostgreSQL URL; unset = parquet only, database endpoints 503 |
+| `API_VERSION_CHECK_S` | `30` | seconds between checks for a new approved dataset version behind `/calendar` |
+| `API_DB_CONNECT_TIMEOUT_S` | `3` | connect timeout of the API's database connections |
+| `REPORTS_ADMIN_TOKEN` | unset | when set, `PATCH`/`DELETE /reports` need it in `X-Admin-Token` |
+
+`POST /processing/jobs` (manual trigger, spec §10) is not implemented; there is no `ADMIN_TOKEN`.
+
+#### `GET /processing/status`
+
+```json
+{
+  "generated_at": "2026-11-15T03:53:05.608Z",
+  "scheduler": {"kinds": [
+    {"kind": "firms_poll", "enabled": true, "cadence": "interval", "interval_seconds": 10800,
+     "day_of_month": null, "next_run_at": "2026-11-15T06:42:43.184Z", "overdue": false,
+     "last_claimed_at": "2026-11-15T03:42:43.184Z", "last_job_id": 4,
+     "active_job": null,
+     "last_run": {"id": 4, "status": "succeeded", "...": "a job list item, see below"},
+     "last_success": {"job_id": 4, "finished_at": "2026-11-15T03:43:43.571Z"},
+     "last_error": null}
+  ]},
+  "approved": {
+    "dataset_version": {"id": 2, "parent_id": 1, "job_id": 4, "calibration_version_id": 1,
+                        "status": "approved", "created_at": "...", "approved_at": "...", "summary": {}},
+    "calibration_version": {"id": 1, "status": "approved", "label": "bootstrap", "k_table_ref": "parquet:...",
+                            "snpp_end": "2026-11-02", "r_global": 0.983, "mask_version": "mask-7935676995ad",
+                            "created_at": "...", "approved_at": "..."}
+  },
+  "data": {"raw_detections": 3744, "pending_detections": 0, "approved_cell_months": 13251},
+  "last_error": null
+}
+```
+
+- One `kinds` entry per `schedules` row. `active_job` is the queued or running job of that kind
+  (a job list item plus `lease_owner`, `lease_expires_at`, `heartbeat_at`), or null. `last_run`
+  is the newest finished job of the kind; `last_success` the newest `succeeded` or `no_change`;
+  `overdue` is true when an enabled kind's `next_run_at` has passed (no worker is claiming it).
+- `last_error` (per kind and overall): the newest `failed`, `abandoned` or `rejected` job,
+  `{"job_id", "kind", "status", "error", "finished_at"}`, or null. A rejection usually has no
+  `error`; its reasons are in the job detail (`verdict`, `gates`).
+- `approved.*` is null before the bootstrap.
+
+#### `GET /processing/jobs`
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `kind` | all | job kind (`firms_poll`, `monthly_reconcile`), or several separated by commas |
+| `status` | all | `queued`, `running`, `succeeded`, `no_change`, `held`, `rejected`, `failed`, `abandoned`, or several separated by commas |
+| `limit` | `50` | 1-200 |
+| `offset` | `0` | jobs to skip |
+
+Newest first (by id). 400 for an unknown status, a malformed kind, or `limit`/`offset` out of range.
+
+```json
+{"jobs": [
+  {"id": 2, "kind": "firms_poll", "status": "held", "trigger": "schedule",
+   "created_at": "2026-11-15T03:31:06.622Z", "started_at": "2026-11-15T03:31:06.622Z",
+   "finished_at": "2026-11-15T03:33:03.360Z", "duration_s": 116.739,
+   "counts": {"fetched": 176, "new": 35, "modified": 0, "unchanged": 141, "pending": 2952,
+              "affected": 174, "detections": 2952, "staged": 174},
+   "decision": "hold", "ai_review": "completed", "dataset_version_id": null,
+   "calibration_version_id": 1, "error": null}
+ ],
+ "total": 4, "limit": 50, "offset": 0}
+```
+
+- `counts`: rows fetched from FIRMS, new / modified / unchanged among them, detections pending
+  processing, affected cell-months, detections loaded for them, rows staged. A count is null when
+  the job did not get that far (a `no_change` job has no `affected`).
+- `decision`: `approve`, `hold` or `reject` when the job processed data, else null.
+  `ai_review`: `completed`, `unavailable` (every model failed: decided on the gates), `disabled`
+  (no models configured), or null. `dataset_version_id`: the version the job published, if any.
+  `error`: why a job failed, or null.
+
+#### `GET /processing/jobs/<id>`
+
+The list item fields plus everything the Processing Center shows; 404 for an unknown id.
+
+```json
+{
+  "id": 2, "kind": "firms_poll", "status": "held", "...": "all job list item fields",
+  "lease": {"owner": "<host>:<pid>", "expires_at": "2026-11-15T03:37:46.630Z", "heartbeat_at": "2026-11-15T03:33:03.360Z"},
+  "decision_basis": "verdict",
+  "gates": {"passed": true, "results": [
+    {"name": "G1_schema_range", "passed": true, "detail": {"rows": 174, "failures": {}, "affected_keys": 174}},
+    {"name": "G2_conservation", "passed": true, "detail": {}},
+    {"name": "G3_missing_not_zero", "passed": true, "detail": {}},
+    {"name": "G4_frozen_calibration", "passed": true, "detail": {}}]},
+  "soft_flags": [{"flag": "mixed_reference", "rows": 84, "keys": [[68, -5, 2026, 11]]}],
+  "verdict": {"decision": "hold", "reasons": ["All hard gates passed ..."], "flagged_keys": [[68, -5, 2026, 11]]},
+  "review": {"model": "nvidia/nemotron-3.5-super-vl:free", "attempts": 1, "reason": null},
+  "steps": [
+    {"id": 8, "name": "availability", "status": "succeeded", "started_at": "...", "finished_at": "...",
+     "duration_s": 0.905, "summary": {"sources": {}}},
+    {"id": 24, "name": "publish", "status": "skipped", "started_at": "...", "finished_at": "...",
+     "duration_s": 0.003, "summary": {"note": "run held: approved data unchanged, ...", "decision": "hold"}}],
+  "llm_attempts": [
+    {"id": 1, "step": "review", "attempt_no": 1, "model": "nvidia/nemotron-3.5-super-vl:free",
+     "started_at": "...", "latency_ms": 104186, "outcome": "ok", "error_class": null, "error": null,
+     "tokens": {"prompt": 6699, "completion": 17714, "total": 24413}}],
+  "dataset_version": null
+}
+```
+
+- `decision_basis`: why the decision was taken: `verdict` (the Validation reviewer's verdict),
+  `gates_only` (gates passed, no usable review: published on the gates), `hard_gate_failed`
+  (rejected without review). Null when the job made no decision.
+- `gates`: the hard gates G1-G4 as the worker recorded them (`passed` is their conjunction, null
+  without a decision; `detail` is the gate's own report). `soft_flags`: the flags raised, each
+  `{"flag", "rows", "keys"}` (keys possibly truncated by the worker). Keys are
+  `[cy, cx, year, month]` (0.5 degree cell indices, as in `cell_month`).
+- `verdict`: the reviewer's typed verdict, or null (no review, or a fallback). `review`: the model
+  that produced it, how many LLM attempts were made, and the reason when the review was skipped
+  or failed; null without a decision.
+- `steps`: the job's timeline, in start order, each with its `summary` exactly as the worker wrote
+  it (fetch counts per source, filter drops, harmonize flags, completeness per month, the
+  promotion's counts...). Step `status`: `running`, `succeeded`, `skipped`, `failed`.
+- `llm_attempts`: every model call, in order: `outcome` is `ok`, `timeout`, `rate_limited`,
+  `quota_exhausted`, `http_error`, `invalid_output` or `error`; `error_class` and `error` (short,
+  redacted) explain a failure; `tokens` are null when the provider reported none.
+- `dataset_version`: the version this job published (shape as in `/processing/datasets`), or null.
+
+#### `GET /processing/datasets`
+
+`limit` (1-200, default 50) and `offset` as for jobs. Newest first.
+
+```json
+{"datasets": [
+  {"id": 2, "parent_id": 1, "job_id": 4, "calibration_version_id": 1, "status": "approved",
+   "created_at": "...", "approved_at": "...",
+   "summary": {"job_id": 4, "keys": 181, "inserted": 181, "updated": 0, "history_rows": 0,
+               "months": ["2026-10", "2026-11"], "soft_flags": ["mixed_reference", "modis_partial", "partial"],
+               "cleared_pending": 3744, "...": "..."},
+   "current_rows": 181},
+  {"id": 1, "parent_id": null, "job_id": null, "calibration_version_id": 1, "status": "superseded",
+   "summary": {"source": "bootstrap", "rows": 13070, "years": [2001, 2025]}, "current_rows": 13070}],
+ "total": 2, "limit": 50, "offset": 0,
+ "calibrations": [{"id": 1, "status": "approved", "label": "bootstrap", "...": "as in /processing/status"}]}
+```
+
+`summary` is the worker's record of the version (the bootstrap's source file, or the promoting
+job's keys, months, soft flags and promotion counts). `current_rows`: approved `cell_month` rows
+whose latest value comes from this version.
+
+#### `GET /fires/live`
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `hours` | `48` | window length, whole hours 1-168 |
+| `bbox` | none | `minLon,minLat,maxLon,maxLat` (same rules and 400s as `/calendar`) |
+| `source` | all | FIRMS source id(s), e.g. `VIIRS_NOAA20_NRT`, several separated by commas |
+
+NRT detections from `raw_detections` (never FIRMS itself) whose acquisition time (UTC,
+`acq_date` + `acq_time`) lies in `[end - hours, end]`, where `end` is the newest stored NRT
+detection of the requested sources. The bbox does not move the window, so a quiet area shows an
+empty list, not old fires. 400 for bad `hours`, `bbox` or `source`.
+
+```json
+{"snapshot": "2026-11-15T03:42:45.302Z",
+ "window": {"start": "2026-11-14T00:58:00Z", "end": "2026-11-15T00:58:00Z"},
+ "detections": [
+   {"id": 2858, "lat": 35.85041, "lon": 8.59264, "acq_time": "2026-11-14T01:15:00Z",
+    "source": "VIIRS_NOAA21_NRT", "satellite": "N21", "sensor": "viirs", "confidence": "n",
+    "frp": 0.77, "daynight": "N"},
+   "...",
+   {"id": 2952, "lat": 37.57137, "lon": -0.92264, "acq_time": "2026-11-15T00:58:00Z",
+    "source": "VIIRS_NOAA21_NRT", "satellite": "N21", "sensor": "viirs", "confidence": "n",
+    "frp": 1.66, "daynight": "N"}],
+ "sources": [{"source": "MODIS_NRT", "max_acq_date": "2026-11-14"},
+             {"source": "VIIRS_NOAA20_NRT", "max_acq_date": "2026-11-14"},
+             {"source": "VIIRS_NOAA21_NRT", "max_acq_date": "2026-11-15"},
+             {"source": "VIIRS_SNPP_NRT", "max_acq_date": "2026-11-02"}],
+ "meta": {"count": 155, "product": "NRT", "hours": 24, "bbox": [-2.5, 34.0, 11.5, 38.0]}}
+```
+
+- `snapshot`: when the newest stored FIRMS response was fetched (`window.end` if none).
+- `detections`: oldest first. `satellite`, `source` and `confidence` are as FIRMS delivered them
+  (MODIS confidence is a 0-100 number as text, VIIRS `l`/`n`/`h`); `sensor` is `modis` for MODIS
+  sources and `viirs` otherwise; `frp` may be null.
+- `sources`: every stored NRT source (of the filter) with its newest acquisition date, so the map
+  can say which satellite is behind.
+- With no stored NRT detection, `snapshot` and the window are null and `detections` is empty.
+
+#### Community reports: `/reports`
+
+```json
+{"id": "0b6c3f5e-8a7d-4a0e-9a59-7d3c2f1e0a11", "lat": 36.95, "lon": 9.1, "observed": "smoke",
+ "note": "smoke over the hill", "status": "pending", "createdAt": "2026-11-15T09:12:44.512Z",
+ "reviewedAt": null}
+```
+
+| Call | Body | Answer |
+|---|---|---|
+| `GET /reports` | | `{"reports": [report]}`, newest first, at most 500 |
+| `POST /reports` | `{"lat", "lon", "observed", "note"}` | **201** and the new report (`status` `pending`) |
+| `PATCH /reports/<id>` | `{"status": "pending" \| "confirmed" \| "false"}` | the updated report |
+| `DELETE /reports/<id>` | | **204** |
+
+- `lat` -90..90 and `lon` -180..180 (JSON numbers), `observed` one of `smoke`, `flames`, `both`,
+  `unsure`, `note` optional (trimmed, at most 280 characters after trimming). Invalid bodies get
+  **422** with FastAPI's `detail` list. Other fields in the body (`id`, `status`, times) are
+  ignored: ids are server-generated UUIDs.
+- `PATCH` sets `reviewedAt` to the review time for `confirmed`/`false` and clears it for
+  `pending`. `PATCH`/`DELETE` of an unknown id: **404**.
+- When `REPORTS_ADMIN_TOKEN` is set, `PATCH` and `DELETE` need the header
+  `X-Admin-Token: <token>`: **401** without it, **403** with a wrong one (compared in constant
+  time; checked before the body or the id). Unset, they are open (local development only).
+  `GET` and `POST` are always open.
+- Schema: migration `0003` creates `community_reports` (run `alembic upgrade head`); until then
+  the endpoints answer 503.
+
 ### Teammate routers
 
 `api/passport.py` and `api/weather.py` are mounted automatically when they exist. Each must export
@@ -284,7 +542,8 @@ cell, 422 bad window or date, 503 no forecast cache.
 
 Code that needs the data should use `api/core.py`: `get_data()`, `get_validation()`,
 `get_areas()`, `get_area(id)`, `calendar_for_bbox(bbox, start, end)`. Data loads on first use and
-is cached.
+is cached (from the database or the parquet, see `/calendar`). Database access goes through
+`api/database.py` (`read()` for READ ONLY transactions).
 
 ## Method and limits
 
