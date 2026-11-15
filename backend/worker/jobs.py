@@ -61,6 +61,10 @@ class JobContext:
     counts: dict = field(default_factory=dict)
     # Applied to every error text stored in the database; firms_poll sets it to Client.redact.
     redact: Callable[[str], str] = field(default=lambda s: s)
+    # The AI review's LLM factory and quota check (worker.review.run_processing); None = the real
+    # OpenRouter ones. Tests inject stubs.
+    llm_factory: Callable[..., Any] | None = None
+    quota_check: Callable[[Any], Any] | None = None
 
     def now(self) -> datetime:
         return checked_now(self.clock)

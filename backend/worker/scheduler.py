@@ -50,8 +50,11 @@ class Claim:
 
 class Scheduler:
     def __init__(self, engine: Engine, settings: Settings, worker_id: str, handlers: dict[str, Handler],
-                 clock: Clock = utcnow, client_factory: Callable[[str], Any] = default_client_factory):
+                 clock: Clock = utcnow, client_factory: Callable[[str], Any] = default_client_factory,
+                 llm_factory: Callable[..., Any] | None = None, quota_check: Callable[[Any], Any] | None = None):
         self.engine = engine
+        self.llm_factory = llm_factory  # None: worker.review uses the real OpenRouter client
+        self.quota_check = quota_check
         self.settings = settings
         self.worker_id = worker_id
         self.handlers = dict(handlers)
@@ -213,7 +216,8 @@ class Scheduler:
     def run(self, claim: Claim) -> str:
         """Run a claimed job to a final status, heartbeating meanwhile; always release the lock."""
         ctx = JobContext(engine=self.engine, job_id=claim.job_id, kind=claim.kind, settings=self.settings,
-                         clock=self.clock, client_factory=self.client_factory, worker_id=self.worker_id)
+                         clock=self.clock, client_factory=self.client_factory, worker_id=self.worker_id,
+                         llm_factory=self.llm_factory, quota_check=self.quota_check)
         stop = threading.Event()
         beat = threading.Thread(target=self._heartbeat, args=(claim.job_id, stop),
                                 name=f"heartbeat-{claim.job_id}", daemon=True)
@@ -263,6 +267,8 @@ class Scheduler:
                 return
 
     def _finish(self, claim: Claim, status: str, error: str | None, counts: dict) -> None:
+        # A promotion marks its job `succeeded` inside its own transaction (spec §8), so a job may
+        # already be succeeded here; it still gets its counts and finished_at.
         try:
             with self.engine.begin() as c:
                 done = c.execute(text("""
@@ -270,7 +276,8 @@ class Scheduler:
                     SET status = :status, finished_at = :now, heartbeat_at = :now, error = :error,
                         fetched_count = :fetched, new_count = :new, modified_count = :modified,
                         unchanged_count = :unchanged, pending_count = :pending
-                    WHERE id = :id AND status = 'running' AND lease_owner = :owner"""),
+                    WHERE id = :id AND lease_owner = :owner
+                      AND (status = 'running' OR (status = 'succeeded' AND CAST(:status AS text) = 'succeeded'))"""),
                     {"id": claim.job_id, "owner": self.worker_id, "status": status, "error": error,
                      "now": self._now(), **{k: counts.get(k) for k in
                                             ("fetched", "new", "modified", "unchanged", "pending")}}).rowcount

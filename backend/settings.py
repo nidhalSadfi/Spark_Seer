@@ -52,6 +52,8 @@ class Settings:
     openrouter_quota_check: bool = True
     review_deadline_s: float = 300.0
     review_summary_max_chars: int = 8000
+    # Staging rows of jobs that finished longer ago than this are deleted (spec §8 retention).
+    staging_retention_days: int = 30
 
     def __post_init__(self) -> None:
         _check(self.firms_poll_interval_hours > 0 and math.isfinite(self.firms_poll_interval_hours),
@@ -83,6 +85,8 @@ class Settings:
         _check(self.review_deadline_s > 0 and math.isfinite(self.review_deadline_s), "REVIEW_DEADLINE_S",
                "must be a number > 0", self.review_deadline_s)
         # Below ~1000 characters a summary cannot even hold the gate results.
+        _check(self.staging_retention_days >= 1, "STAGING_RETENTION_DAYS", "must be an integer >= 1",
+               self.staging_retention_days)
         _check(self.review_summary_max_chars >= 1000, "REVIEW_SUMMARY_MAX_CHARS", "must be an integer >= 1000",
                self.review_summary_max_chars)
 
@@ -135,6 +139,8 @@ class Settings:
             kw["review_deadline_s"] = _number("REVIEW_DEADLINE_S", v, float)
         if (v := _get("REVIEW_SUMMARY_MAX_CHARS")) is not None:
             kw["review_summary_max_chars"] = _number("REVIEW_SUMMARY_MAX_CHARS", v, int)
+        if (v := _get("STAGING_RETENTION_DAYS")) is not None:
+            kw["staging_retention_days"] = _number("STAGING_RETENTION_DAYS", v, int)
         return cls(**kw)
 
 
