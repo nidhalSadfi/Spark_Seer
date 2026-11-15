@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { DATA_RANGE } from '../services/fireApi'
-import { getAreas } from '../services/emberApi'
+import { getAreas, getHealth } from '../services/emberApi'
 import { FALLBACK_AREAS } from '../services/constants'
 import { bboxOf } from '../utils/geo'
 
@@ -13,6 +13,10 @@ import { bboxOf } from '../utils/geo'
  *               pages query the API by bbox instead
  *  - `target`   what the data hooks send to the API: { area } or { bbox }, plus a stable `key`
  *  - `sensor`, `startYear`, `endYear`
+ *  - `dataEndYear` last year with data: GET /health `data_end_year` (the API's default calendar
+ *               end, e.g. 2026 with the database). DATA_RANGE.endYear (2025) only while /health
+ *               has not answered, when it is unreachable (offline mock) or from an older API.
+ *               `endYear` follows it until the user picks a year range.
  */
 const FilterContext = createContext(null)
 const DEFAULT_REGION = 'bizerte'
@@ -21,7 +25,7 @@ export function FilterProvider({ children }) {
   const [region, setRegion] = useState(DEFAULT_REGION)
   const [sensor, setSensor] = useState('harmonized')
   const [startYear, setStartYear] = useState(DATA_RANGE.startYear)
-  const [endYear, setEndYear] = useState(DATA_RANGE.endYear)
+  const [pickedEndYear, setEndYear] = useState(null) // null: follow dataEndYear
   const [aoi, setAoi] = useState(null)
 
   const { data: apiAreas } = useQuery({
@@ -31,6 +35,11 @@ export function FilterProvider({ children }) {
     retry: 1,
   })
   const areas = apiAreas?.length ? apiAreas : FALLBACK_AREAS
+
+  // Same query as useDataMode's badge (one request); retry off so offline falls back at once.
+  const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, retry: false, staleTime: 30 * 1000 })
+  const dataEndYear = Number.isInteger(health?.data_end_year) ? health.data_end_year : DATA_RANGE.endYear
+  const endYear = pickedEndYear ?? dataEndYear
 
   const value = useMemo(() => {
     const activeRegion = areas.some((a) => a.id === region) ? region : areas[0].id
@@ -51,6 +60,7 @@ export function FilterProvider({ children }) {
       setSensor,
       startYear,
       endYear,
+      dataEndYear,
       setYearRange: (s, e) => {
         setStartYear(Math.min(s, e))
         setEndYear(Math.max(s, e))
@@ -59,7 +69,7 @@ export function FilterProvider({ children }) {
       setAoi,
       target,
     }
-  }, [areas, region, sensor, startYear, endYear, aoi])
+  }, [areas, region, sensor, startYear, endYear, dataEndYear, aoi])
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>
 }

@@ -1,76 +1,145 @@
-# Spark Seer
+# EmberGuard
 
-Satellite fire-intelligence for the **NASA Space Apps Challenge 2026**: a web dashboard on top of an API that harmonizes
-MODIS and VIIRS active-fire records into one burning-activity calendar, with historical anomaly analysis.
+Harmonized MODIS + VIIRS fire-activity monitoring for North Africa: a FastAPI backend over NASA
+FIRMS data and a React dashboard (NASA Space Apps Challenge 2026, Tunis).
+
+## Layout
 
 ```
-Spark_Seer/
-├── frontend/     React + Vite dashboard (landing page, map, calendar, analytics, data explorer)   → frontend/README.md
-├── backend/      EmberLedger API: Python / FastAPI + the MODIS→VIIRS harmonization pipeline          → backend/README.md
-└── render.yaml   Render deploy blueprint for the API (must stay at the repo root; it points at backend/)
+backend/              FastAPI API, harmonization pipeline, tests (from origin/MNS-backend)
+backend/firms_tool/   NASA FIRMS download tool (copied from origin/harmonization-modis-viirs)
+frontend/             React + Vite dashboard (from origin/frontend)
+docker-compose.yml    local services (Postgres for now)
+.env.example          environment variables, with safe local-only defaults
+render.yaml           Render blueprint for the API (rootDir: backend)
 ```
 
-## Run it
+The processing architecture spec is `docs/processing/ARCHITECTURE.md`.
 
-Two processes: the **backend** (API on port 8000) and the **frontend** (Vite on port 5173). Start the backend first.
-If it isn't running, the dashboard still works but falls back to generated sample data and says so in the header.
-
-### Backend (`backend/`, Python 3.11+)
+## Backend
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate              # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+python -m firms_tool sensors     # firms_tool CLI; needs FIRMS_MAP_KEY for API downloads
 ```
 
-Then start the API with **either** fake test data **or** the real pipeline output:
+See `backend/README.md` for running the API, the data pipeline and the Render deploy.
+
+## Frontend
+
+Vite 8 needs Node `^20.19` or `>=22.12`. Then `cd frontend && npm install && npm run dev`.
+See `frontend/README.md`.
+
+## Database and worker
 
 ```bash
-# A) Fake data (quick start). Clearly marked synthetic: the UI labels it as such. Never present it as results.
-python scripts/make_fake_data.py --optional                                       # writes backend/data/fake/
-EMBER_DATA=data/fake/harmonized.parquet uvicorn api.main:app --reload --port 8000    # macOS / Linux
+cp .env.example .env    # then fill in the keys you need
+docker compose up -d db
+set -a; . ./.env; set +a          # the Python code reads the environment, not .env
+cd backend
+alembic upgrade head              # creates the processing tables (alembic upgrade head --sql prints the DDL)
+python -m worker.bootstrap        # once: approved calibration 1 + dataset 1 from data/ (a second run does nothing)
+python -m worker --once           # one scheduler tick; without --once it ticks every WORKER_TICK_SECONDS
+pytest -m pg                      # PostgreSQL tests against TEST_DATABASE_URL (skipped if unreachable)
 ```
-```powershell
-# A) Fake data, Windows PowerShell
-python scripts/make_fake_data.py --optional
-$env:EMBER_DATA = "data/fake/harmonized.parquet"
-uvicorn api.main:app --reload --port 8000
-```
+
+`python -m worker.bootstrap` (run from `backend/`) loads, in one transaction, calibration version 1
+(k from `data/harmonized.parquet`, its validation report `data/harmonized_validation.json`, the
+approved r of `data/inter_viirs_fit.json`, and the static-mask version of `STATIC_MASK_FILE` or
+`--mask`) and approved dataset version 1 (every parquet row into `cell_month`; VIIRS is NULL
+before 2012, spec §15). If any calibration or dataset version already exists it does nothing and
+exits 0. `--parquet`, `--validation`, `--inter-viirs` and `--mask` override the files. Set
+`STATIC_MASK_FILE` the same way for the worker: `firms_poll` refuses to run with a mask other than
+the calibration's (I6).
+
+The worker polls NASA FIRMS (`firms_poll`, every `FIRMS_POLL_INTERVAL_HOURS`) and stores raw
+detections; see `docs/processing/ARCHITECTURE.md`. When there are new, modified or still-pending
+detections, it recomputes their cell-months (all stored detections of each) with the approved
+calibration, runs the review flow, writes the rows to `cell_month_staging` and then publishes them
+in one transaction (`cell_month`, `cell_month_history`, a new `dataset_versions` row), or keeps
+them unpublished when the run is held or rejected; those detections stay pending for the next
+poll. Each job records its steps (`job_steps`), LLM attempts (`llm_attempts`), `ai_review` and the
+decision with the gate results and the Validation reviewer's verdict (`processing_jobs.decision`).
+Staging rows are deleted `STAGING_RETENTION_DAYS` (default 30) after their job finished.
+`monthly_reconcile` is not implemented yet; its schedule stays disabled. It needs `pip install -r requirements-worker.txt`
+(requirements.txt plus CrewAI, pinned to 1.15.x); the API keeps using `requirements.txt` and never
+imports CrewAI. `requirements-dev.txt` includes the worker requirements, so `pytest` covers both. Only the `db` service exists for now; `api` and
+`worker` services arrive in later phases. `docker/initdb/` creates the `emberguard_test` database
+when the db volume is first initialised.
+
+## AI review (CrewAI + OpenRouter)
+
+`backend/worker/review.py` runs the processing stages as a CrewAI flow, then three reviewer agents
+whose verdict can only downgrade the deterministic hard gates (spec §7). Configure it in `.env`:
+
+- `OPENROUTER_API_KEY`: required when a model list is set.
+- `OPENROUTER_MODELS`: comma-separated OpenRouter model ids, tried in order. **Empty (the default)
+  disables the review**: runs are decided by the hard gates alone (`ai_review = "disabled"`) and
+  CrewAI is not even imported.
+- `OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT_S`, `OPENROUTER_RETRIES`: endpoint, per-request
+  timeout and HTTP retries.
+- `REVIEW_DEADLINE_S`: time budget for the whole review; no model is started after it. If every
+  model fails, a run that passed the gates is published with `ai_review = "unavailable"`.
+- `REVIEW_SUMMARY_MAX_CHARS`: cap on each summary an agent is shown.
+- `OPENROUTER_QUOTA_CHECK` (default `true`): check the key's remaining free-model requests first;
+  set `false` for a paid key.
+
+Free tier (50 free-model requests a day per key, shared by 8 polls): one attempt costs at most 3
+requests (summaries are in the prompts, one answer per agent). With fewer than 3 left the review is
+skipped (`reason: "daily_quota"`), and a daily-quota 429 stops the model chain; either way a run
+that passed the gates is still published (D3, `ai_review = "unavailable"`).
+
+Before importing CrewAI the worker switches off its telemetry, tracing, version check and `.env`
+loading, and points its storage at `CREWAI_STORAGE_DIR` (default: a per-user directory under the
+system temp dir), so CrewAI writes nothing under `$HOME`. `firms_poll` runs this flow for every
+job with pending detections; tests use stub models only.
+
+## Processing science
+
+`backend/processing/` holds the deterministic stages of spec §5-§6 (shared filter, country clip,
+static-source mask, 0.5° counts, harmonization with a frozen calibration, completeness, gates G1-G4,
+drift) as pure Python, tested on synthetic data only. Two CLIs build the real artefacts once the
+FIRMS yearly country CSVs for Tunisia and Algeria exist (run from `backend/`):
+
 ```bash
-# B) Real data: unzipped FIRMS yearly CSVs (MODIS C6.1 + VIIRS S-NPP 375 m) in backend/data/raw/
-python pipeline/ingest.py data/raw data/cells.parquet 34
-python pipeline/calibrate.py data/cells.parquet data/harmonized.parquet
-uvicorn api.main:app --reload --port 8000
+python -m processing.build_mask data/raw data/static_mask.json          # then STATIC_MASK_FILE=...
+python -m processing.fit_inter_viirs data/raw data/inter_viirs_fit.json  # proposed r (S-NPP / NOAA-20)
 ```
 
-Check it: <http://localhost:8000/health> should return `"status": "ok"`; interactive docs are at <http://localhost:8000/docs>.
-Optional: set `ANTHROPIC_API_KEY` to turn on the passport's AI wording (the passport works without it).
-Backend tests: `pip install -r requirements-dev.txt && pytest`. Full API reference: [backend/README.md](backend/README.md).
-
-### Frontend (`frontend/`)
+The inter-VIIRS factor r is fitted on a Mediterranean pool and validated on Tunisia + Algeria
+(spec §5). Download the pool (S-NPP and NOAA-20 yearly country files, about 105 MB), then fit:
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env.local     # optional: only needed if the API is not at http://localhost:8000
-npm run dev                    # http://localhost:5173
+python -m firms_tool archive --sensors viirs_snpp viirs_noaa20 --years 2019-2025 \
+    --countries Morocco Spain Portugal Italy Greece Turkey --out <pool_dir>
+python -m processing.fit_inter_viirs <pool_dir> data/inter_viirs_fit.json --validate-dir data/raw
 ```
 
-Set `VITE_API_URL` in `frontend/.env.local` to use another backend, e.g. a deployed one (`https://<service>.onrender.com`;
-free Render instances take up to a minute to wake up). Other scripts: `npm run build`, `npm run preview`, `npm run lint`.
+With `--validate-dir`, r is fitted on the pool over the train years and validated on `data/raw`
+over the test years; the output adds the validation errors (r = 1, global r, per-month r), the
+pool's file list, hash and countries, and `approved_r` from the acceptance rule (the global r if it
+beats r = 1, else 1.0). Only the global r is applied (`Calibration.with_global_r`).
 
-## Troubleshooting
-- **Header badge says "API offline · sample data"**: the frontend cannot reach the backend. Check `curl http://localhost:8000/health` and `VITE_API_URL`, then reload.
-- **`Cannot find native binding` when running `npm run dev`**: `frontend/node_modules` was installed on a different OS (e.g. Windows) than the one running Vite (e.g. WSL). Run `npm install` and `npm run dev` in the same environment. Keep `package-lock.json`.
-- **`npm install` hangs or `ECONNRESET`**: `registry.npmjs.org` may be blocked by a network firewall. Use a mirror: `npm install --registry https://registry.yarnpkg.com`.
-- **`POST /investigate` returns 500** (the passport button fails): the backend predates the integer-years fix in `backend/api/passport.py` (`CAL_START`/`CAL_END` must be ints, not `"YYYY-MM"` strings). This repo already contains the fix.
+The country clip needs a boundary GeoJSON (`COUNTRY_BOUNDARY_FILE`); none is committed yet. While
+the mask or boundary file is unset, the run reports that rule as disabled.
 
-## Deploying the API
-`render.yaml` (repo root) deploys `backend/` to Render on every merge to `main`; see the Deploy section of
-[backend/README.md](backend/README.md). The data files it serves (`data/harmonized.parquet`, `data/harmonized_validation.json`)
-must be committed under `backend/data/`.
+## Where the code came from
 
-## Data
-NASA FIRMS active-fire data (MODIS Collection 6.1, VIIRS 375 m). We acknowledge the use of data from NASA's Fire Information
-for Resource Management System (FIRMS), part of NASA's LANCE and ESDIS.
+`backend/` and `frontend/` are subtree merges of the teammate branches, so their history is
+preserved. `backend/firms_tool/` was copied (not merged) from
+`origin/harmonization-modis-viirs@e07ecf5` (`harmonization-modis-viirs/firms_tool/`), together with
+its tests (`backend/tests/test_firms_*.py`); that branch's docs and pipeline were left out.
+
+To pull teammate updates later:
+
+```bash
+git fetch origin
+git merge -X subtree=backend origin/MNS-backend   # backend-core plus Meteomatics, real data, demo page
+git merge -X subtree=frontend origin/frontend
+```
+
+Changes to firms_tool on `origin/harmonization-modis-viirs` are not picked up by a merge: copy
+them over by hand.

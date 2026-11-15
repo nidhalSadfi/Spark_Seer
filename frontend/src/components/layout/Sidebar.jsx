@@ -1,6 +1,6 @@
 import { Link, NavLink } from 'react-router-dom'
 import { motion } from 'motion/react'
-import { CalendarDays, ChartLine, Database, Flame, LayoutDashboard, Map, Siren } from 'lucide-react'
+import { CalendarDays, ChartLine, Database, Flame, LayoutDashboard, Map, Siren, Workflow } from 'lucide-react'
 import { useReports } from '../../hooks/useReports'
 
 export const NAV_ITEMS = [
@@ -10,6 +10,7 @@ export const NAV_ITEMS = [
   { to: '/dashboard/calendar', label: 'Activity Calendar', icon: CalendarDays },
   { to: '/dashboard/analytics', label: 'Analytics', icon: ChartLine },
   { to: '/dashboard/explorer', label: 'Data Explorer', icon: Database },
+  { to: '/dashboard/processing', label: 'Processing Center', icon: Workflow },
 ]
 
 // Instruments feeding the harmonized record (names only; no live-status claim).

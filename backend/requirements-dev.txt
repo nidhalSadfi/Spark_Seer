@@ -1,2 +1,2 @@
--r requirements.txt
+-r requirements-worker.txt   # the tests cover the worker too, crewai included (the API deploy uses requirements.txt)
 pytest

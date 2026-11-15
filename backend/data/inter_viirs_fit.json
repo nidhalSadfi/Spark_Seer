@@ -1,0 +1,346 @@
+{
+  "acceptance": {
+    "approved": "r_global",
+    "approved_r": 0.9832522641551213,
+    "error_pct_month_ratio": 13.2,
+    "error_pct_r1": 13.4,
+    "error_pct_r_global": 12.6,
+    "r_global": 0.9832522641551213,
+    "rule": "approved_r = r_global if error_pct_global_ratio < error_pct_uncorrected (r = 1) on the validation set over the test years, else 1.0; errors compared as reported (one decimal), so a tie keeps r = 1; the per-month r is reported, never applied (spec \u00a75)"
+  },
+  "approved_r": 0.9832522641551213,
+  "filter": {
+    "drop_share": {
+      "invalid_coordinates": 0.0,
+      "low_confidence": 0.072075,
+      "outside_country": 0.0,
+      "south_of_min_lat": 0.041456,
+      "sp_type_missing": 0.0,
+      "sp_type_nonzero": 0.237148,
+      "static_mask": 0.0,
+      "unknown_source": 0.0
+    },
+    "dropped": {
+      "invalid_coordinates": {},
+      "low_confidence": {
+        "NOAA20": 51383,
+        "SNPP": 47685
+      },
+      "outside_country": {},
+      "south_of_min_lat": {
+        "NOAA20": 29246,
+        "SNPP": 27736
+      },
+      "sp_type_missing": {},
+      "sp_type_nonzero": {
+        "NOAA20": 167887,
+        "SNPP": 158075
+      },
+      "static_mask": {},
+      "unknown_source": {}
+    },
+    "dropped_total": 482012,
+    "input_rows": 1374511,
+    "kept_by_family": {
+      "NOAA20": 453377,
+      "SNPP": 439122
+    },
+    "kept_rows": 892499,
+    "rules": {
+      "country_clip": {
+        "reason": "no country boundary given (COUNTRY_BOUNDARY_FILE unset)",
+        "status": "disabled"
+      },
+      "min_lat": 34.0,
+      "modis_min_confidence": 30.0,
+      "sp_keep_type": 0,
+      "static_mask": {
+        "reason": "no static-source mask given (STATIC_MASK_FILE unset)",
+        "status": "disabled"
+      },
+      "viirs_confidences": [
+        "n",
+        "h",
+        "nominal",
+        "high"
+      ]
+    }
+  },
+  "input": {
+    "countries": [
+      "Greece",
+      "Italy",
+      "Morocco",
+      "Portugal",
+      "Spain",
+      "Turkey"
+    ],
+    "file_list": [
+      "viirs_noaa20/viirs-jpss1_2019_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2019_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2019_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2019_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2019_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2019_Turkey.csv",
+      "viirs_noaa20/viirs-jpss1_2020_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2020_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2020_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2020_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2020_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2020_Turkey.csv",
+      "viirs_noaa20/viirs-jpss1_2021_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2021_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2021_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2021_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2021_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2021_Turkey.csv",
+      "viirs_noaa20/viirs-jpss1_2022_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2022_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2022_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2022_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2022_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2022_Turkey.csv",
+      "viirs_noaa20/viirs-jpss1_2023_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2023_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2023_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2023_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2023_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2023_Turkey.csv",
+      "viirs_noaa20/viirs-jpss1_2024_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2024_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2024_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2024_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2024_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2024_Turkey.csv",
+      "viirs_noaa20/viirs-jpss1_2025_Greece.csv",
+      "viirs_noaa20/viirs-jpss1_2025_Italy.csv",
+      "viirs_noaa20/viirs-jpss1_2025_Morocco.csv",
+      "viirs_noaa20/viirs-jpss1_2025_Portugal.csv",
+      "viirs_noaa20/viirs-jpss1_2025_Spain.csv",
+      "viirs_noaa20/viirs-jpss1_2025_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2019_Greece.csv",
+      "viirs_snpp/viirs-snpp_2019_Italy.csv",
+      "viirs_snpp/viirs-snpp_2019_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2019_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2019_Spain.csv",
+      "viirs_snpp/viirs-snpp_2019_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2020_Greece.csv",
+      "viirs_snpp/viirs-snpp_2020_Italy.csv",
+      "viirs_snpp/viirs-snpp_2020_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2020_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2020_Spain.csv",
+      "viirs_snpp/viirs-snpp_2020_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2021_Greece.csv",
+      "viirs_snpp/viirs-snpp_2021_Italy.csv",
+      "viirs_snpp/viirs-snpp_2021_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2021_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2021_Spain.csv",
+      "viirs_snpp/viirs-snpp_2021_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2022_Greece.csv",
+      "viirs_snpp/viirs-snpp_2022_Italy.csv",
+      "viirs_snpp/viirs-snpp_2022_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2022_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2022_Spain.csv",
+      "viirs_snpp/viirs-snpp_2022_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2023_Greece.csv",
+      "viirs_snpp/viirs-snpp_2023_Italy.csv",
+      "viirs_snpp/viirs-snpp_2023_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2023_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2023_Spain.csv",
+      "viirs_snpp/viirs-snpp_2023_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2024_Greece.csv",
+      "viirs_snpp/viirs-snpp_2024_Italy.csv",
+      "viirs_snpp/viirs-snpp_2024_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2024_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2024_Spain.csv",
+      "viirs_snpp/viirs-snpp_2024_Turkey.csv",
+      "viirs_snpp/viirs-snpp_2025_Greece.csv",
+      "viirs_snpp/viirs-snpp_2025_Italy.csv",
+      "viirs_snpp/viirs-snpp_2025_Morocco.csv",
+      "viirs_snpp/viirs-snpp_2025_Portugal.csv",
+      "viirs_snpp/viirs-snpp_2025_Spain.csv",
+      "viirs_snpp/viirs-snpp_2025_Turkey.csv"
+    ],
+    "files": 84,
+    "files_sha256": "6cfa06b0b36b4b598c9012810fe17150757b4f55532b2dbf15951aed21c75390",
+    "raw_csv_dir": "/tmp/claude-129263942/-home-g701952-Spark-Seer/7d17fd11-efe3-4168-81d9-b618f07b77b4/scratchpad/rtest/raw",
+    "role": "fit pool"
+  },
+  "kind": "emberguard.inter_viirs_fit",
+  "note": "Neither the static-source mask nor the country clip was applied (filter.rules): the per-country FIRMS files are used as delivered, with the other filter rules (north of the minimum latitude, confidence, SP type).",
+  "outages": {
+    "file": "/home/g701952/Spark_Seer/.claude/worktrees/emberguard-firms-architecture-3b252e/backend/processing/data/known_outages.json",
+    "sha256": "471d122698798f71a362819265dddbd6bd397d428ef33ee8e66ac83907e6ed04",
+    "source": "Australia exploration: table 'Data gaps' (longest zero-detection runs per satellite, type 0) and finding 7 (outlier months): origin/harmonization-modis-viirs:harmonization-modis-viirs/docs/data-exploration.md (branch head e07ecf5); listed in docs/processing/ARCHITECTURE.md section 5."
+  },
+  "r": {
+    "1": 0.951536284235065,
+    "10": 0.9802707169962768,
+    "11": 0.9654179693941931,
+    "12": 0.9546436125971508,
+    "2": 0.9353900125290404,
+    "3": 0.9592115971215835,
+    "4": 0.9468621627674668,
+    "5": 1.0346524355314506,
+    "6": 1.0116560460481074,
+    "7": 0.989781840231182,
+    "8": 0.9853664708011299,
+    "9": 1.0117872952329445
+  },
+  "r_global": 0.9832522641551213,
+  "report": {
+    "australia_reference_r": 1.02,
+    "deviation_from_reference_pct": -3.6,
+    "error_pct_global_ratio": 4.2,
+    "error_pct_month_ratio": 4.7,
+    "error_pct_uncorrected": 4.2,
+    "excluded_month_list": [
+      "2022-07",
+      "2022-08",
+      "2023-07",
+      "2024-05",
+      "2024-06",
+      "2024-07",
+      "2024-11"
+    ],
+    "excluded_months": 7,
+    "pseudo": 20.0,
+    "r": {
+      "1": 0.9515,
+      "10": 0.9803,
+      "11": 0.9654,
+      "12": 0.9546,
+      "2": 0.9354,
+      "3": 0.9592,
+      "4": 0.9469,
+      "5": 1.0347,
+      "6": 1.0117,
+      "7": 0.9898,
+      "8": 0.9854,
+      "9": 1.0118
+    },
+    "r_global": 0.9833,
+    "test_months": 20,
+    "test_years": [
+      2024,
+      2025
+    ],
+    "train_months": 57,
+    "train_noaa20": 270962,
+    "train_snpp": 266424,
+    "train_years": [
+      2019,
+      2023
+    ]
+  },
+  "status": "proposed",
+  "validation": {
+    "countries": [
+      "Algeria",
+      "Tunisia"
+    ],
+    "error_pct_global_ratio": 12.6,
+    "error_pct_month_ratio": 13.2,
+    "error_pct_uncorrected": 13.4,
+    "excluded_month_list": [
+      "2024-05",
+      "2024-06",
+      "2024-07",
+      "2024-11"
+    ],
+    "excluded_months": 4,
+    "file_list": [
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2018_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2018_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2019_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2019_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2020_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2020_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2021_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2021_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2022_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2022_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2023_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2023_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2024_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2024_Tunisia.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2025_Algeria.csv",
+      "firms_noaa20/viirs_noaa20/viirs-jpss1_2025_Tunisia.csv",
+      "firms_sp/firms_modis_Algeria_2001-2025.csv",
+      "firms_sp/firms_modis_Tunisia_2001-2025.csv",
+      "firms_sp/firms_viirs-snpp_Algeria_2012-2025.csv",
+      "firms_sp/firms_viirs-snpp_Tunisia_2012-2025.csv"
+    ],
+    "files": 20,
+    "files_sha256": "5281b41a9724fda25e27342cb02a04a3d90ed04af620acf7ab46a57428a3e42e",
+    "filter": {
+      "drop_share": {
+        "invalid_coordinates": 0.0,
+        "low_confidence": 0.015075,
+        "outside_country": 0.0,
+        "south_of_min_lat": 0.75494,
+        "sp_type_missing": 0.0,
+        "sp_type_nonzero": 0.121136,
+        "static_mask": 0.0,
+        "unknown_source": 0.0
+      },
+      "dropped": {
+        "invalid_coordinates": {},
+        "low_confidence": {
+          "MODIS": 4820,
+          "NOAA20": 9289,
+          "SNPP": 21923
+        },
+        "outside_country": {},
+        "south_of_min_lat": {
+          "MODIS": 136404,
+          "NOAA20": 580325,
+          "SNPP": 1087692
+        },
+        "sp_type_missing": {},
+        "sp_type_nonzero": {
+          "MODIS": 23499,
+          "NOAA20": 97285,
+          "SNPP": 168749
+        },
+        "static_mask": {},
+        "unknown_source": {}
+      },
+      "dropped_total": 2129986,
+      "input_rows": 2390152,
+      "kept_by_family": {
+        "MODIS": 67230,
+        "NOAA20": 55466,
+        "SNPP": 137470
+      },
+      "kept_rows": 260166,
+      "rules": {
+        "country_clip": {
+          "reason": "no country boundary given (COUNTRY_BOUNDARY_FILE unset)",
+          "status": "disabled"
+        },
+        "min_lat": 34.0,
+        "modis_min_confidence": 30.0,
+        "sp_keep_type": 0,
+        "static_mask": {
+          "reason": "no static-source mask given (STATIC_MASK_FILE unset)",
+          "status": "disabled"
+        },
+        "viirs_confidences": [
+          "n",
+          "h",
+          "nominal",
+          "high"
+        ]
+      }
+    },
+    "raw_csv_dir": "data/raw",
+    "test_months": 20,
+    "test_noaa20": 6027,
+    "test_snpp": 5394,
+    "test_years": [
+      2024,
+      2025
+    ]
+  }
+}

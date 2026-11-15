@@ -43,6 +43,21 @@ def make_dataset(folder, optional_cols=False, series=None) -> str:
     return str(path)
 
 
+@pytest.fixture(autouse=True)
+def api_without_database(monkeypatch):
+    """The API under test never sees the developer's real DATABASE_URL (or a cached engine/frame).
+
+    API tests that need PostgreSQL set DATABASE_URL to their own TEST_DATABASE_URL schema."""
+    from api import core, database
+    for var in ("DATABASE_URL", "REPORTS_ADMIN_TOKEN", "API_VERSION_CHECK_S", "API_DB_CONNECT_TIMEOUT_S"):
+        monkeypatch.delenv(var, raising=False)
+    database.reset()
+    core.reset_cache()
+    yield
+    database.reset()
+    core.reset_cache()
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBER_DATA", make_dataset(tmp_path))

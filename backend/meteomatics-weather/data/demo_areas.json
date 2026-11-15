@@ -1,0 +1,12 @@
+{
+  "bizerte": {
+    "name": "Bizerte city, Tunisia",
+    "lat": 37.27,
+    "lon": 9.87
+  },
+  "nw_tunisia": {
+    "name": "Northwest Tunisia (approximate demo box centre)",
+    "lat": 36.60,
+    "lon": 8.75
+  }
+}

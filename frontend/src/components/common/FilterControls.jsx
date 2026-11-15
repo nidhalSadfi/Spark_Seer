@@ -69,9 +69,9 @@ export function AoiChip() {
 }
 
 export function YearRangePicker() {
-  const { startYear, endYear, setYearRange } = useFilters()
+  const { startYear, endYear, dataEndYear, setYearRange } = useFilters()
   const years = []
-  for (let y = DATA_RANGE.startYear; y <= DATA_RANGE.endYear; y++) years.push({ value: y, label: String(y) })
+  for (let y = DATA_RANGE.startYear; y <= dataEndYear; y++) years.push({ value: y, label: String(y) })
   return (
     <div className="flex items-end gap-2">
       <Select label="From" value={startYear} onChange={(v) => setYearRange(+v, endYear)} options={years} />

@@ -1,17 +1,25 @@
 /**
- * ILLUSTRATIVE MOCK DATA.
+ * Fire data for the map, plus the offline mock data behind it.
  *
- * Two things live here, and neither is real MODIS/VIIRS data:
- *  1. `mockCalendar(areaId)`: an offline stand-in for GET /calendar, in the exact shape the
+ *  1. `getActiveFires`: the near-real-time active-fire feed for the map. It reads
+ *     GET /fires/live (NRT FIRMS detections stored by the backend) and clusters the detections
+ *     in the browser (src/utils/fireClusters.js); `meta.source` is 'api'. Only when the API is
+ *     unreachable (network error, 5xx such as 503 "database unavailable", or a backend without
+ *     the endpoint) does it fall back to the ILLUSTRATIVE mock feed below, with
+ *     `meta.source = 'mock'` and `meta.fallbackReason`; the map page then says so. A 400 (bad
+ *     bbox or hours) is thrown, not hidden.
+ *  2. `mockCalendar(areaId)`: an offline stand-in for GET /calendar, in the exact shape the
  *     EmberLedger API returns. src/services/emberApi.js falls back to it when the backend is
  *     unreachable (the UI then says so).
- *  2. The near-real-time active-fire feed for the map (`getActiveFires`). The backend has no
- *     endpoint for this yet, so the map always uses mock data.
  *
- * All figures come from a seeded PRNG.
+ * Everything mock in this file (the calendar and `mockActiveFires`) comes from a seeded PRNG and
+ * is not real MODIS/VIIRS data.
  */
 import { DATA_END_YEAR, DATA_START_YEAR, VIIRS_START_YEAR } from './constants'
 import { median } from '../utils/stats'
+import { liveFeed } from '../utils/fireClusters'
+import { apiGet, ApiError, isUnavailable } from './http'
+import { FIRMS_BBOX, LIVE_WINDOW_H } from './constants'
 
 const END_YEAR = DATA_END_YEAR // mock calendar covers 2001..2025 like the API's default window
 const NRT_YEAR = 2026 // "now" of the mock near-real-time feed: 31 Oct 2026
@@ -441,12 +449,12 @@ export function regionBounds(region) {
 }
 
 /**
- * Near-real-time active fires for the map (mock FIRMS-like feed).
+ * ILLUSTRATIVE mock of the active-fire feed (offline fallback of `getActiveFires`).
  * `fires` are clusters with per-pass history; `detections` are individual hotspot pixels
  * from the last 24 h. With a raw sensor selected, only that sensor's detections are kept
  * (and fires it did not see are dropped — MODIS misses many small fires).
  */
-export async function getActiveFires({ region = 'global', sensor = 'harmonized' } = {}) {
+export async function mockActiveFires({ region = 'global', sensor = 'harmonized' } = {}) {
   await latency(260)
   // The mock feed only models a few world regions. For any other region (e.g. the backend's
   // Tunisia/Algeria areas) show the whole mock world instead of nothing.
@@ -470,7 +478,33 @@ export async function getActiveFires({ region = 'global', sensor = 'harmonized' 
     window: { start: SNAPSHOT - NRT_WINDOW_H * HOUR, end: SNAPSHOT },
     chartRange: { start: SNAPSHOT - CHART_BACK_H * HOUR, end: SNAPSHOT + FORECAST_H * HOUR },
     bounds: regionBounds(region),
-    meta: describe(region, sensor),
+    meta: { ...describe(region, sensor), source: 'mock' },
+  }
+}
+
+/**
+ * Near-real-time active fires for the map, from GET /fires/live.
+ *
+ *   region  id of the selected named area (only used for naming and map fitting)
+ *   bbox    [minLon, minLat, maxLon, maxLat] to query; defaults to the whole FIRMS region
+ *   areas   [{id, name, bbox}] so a cluster can say which study area it lies in
+ *
+ * Resolves to { fires, detections, snapshot, window, chartRange, bounds, meta } with
+ * `meta.source` 'api' or, when the API is unreachable, 'mock' (+ `meta.fallbackReason`).
+ */
+export async function getActiveFires({ region = null, bbox = FIRMS_BBOX, sensor = 'harmonized', areas = [] } = {}) {
+  try {
+    const res = await apiGet('/fires/live', { hours: LIVE_WINDOW_H, bbox: bbox.join(',') })
+    const feed = liveFeed(res, { sensor, bbox, region, areas })
+    return { ...feed, meta: { ...feed.meta, fetchedAt: Date.now() } }
+  } catch (e) {
+    // 404: a backend deployed before the endpoint existed. Same as unreachable for this feed.
+    const missing = e instanceof ApiError && e.status === 404
+    if (!isUnavailable(e) && !missing) throw e // bad request (400): surface it
+    const reason = missing ? 'This API has no /fires/live endpoint yet.' : e.message
+    console.warn(`[EmberLedger] Live fires: ${reason} Showing illustrative sample fires instead.`)
+    const mock = await mockActiveFires({ region: region ?? 'global', sensor })
+    return { ...mock, meta: { ...mock.meta, fallbackReason: reason } }
   }
 }
 

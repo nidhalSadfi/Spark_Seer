@@ -23,12 +23,13 @@ export default function Overview() {
   const { data: summaries } = useRegionSummaries()
 
   let kpi = null
-  if (matrix) {
-    const last = latestObservation(matrix)
+  const last = matrix ? latestObservation(matrix) : null // the latest month WITH data, never a "none" month
+  if (last) {
     const current = matrix.data[last.yearIdx][last.month]
     const baseline = historicalMedian(matrix, last.year, last.month)
     kpi = {
-      label: `${MONTHS[last.month]} ${last.year}`,
+      label: `${MONTHS[last.month]} ${last.year}${last.partial ? ' (partial)' : ''}`,
+      partial: last.partial,
       current,
       baseline,
       anomaly: anomalyPct(current, baseline),
@@ -61,7 +62,7 @@ export default function Overview() {
           signed
           tone={anomalyTone(kpi?.anomaly)}
           loading={isLoading}
-          hint="vs. historical median"
+          hint={kpi?.partial ? 'vs. historical median · month still in progress' : 'vs. historical median'}
         />
       </motion.div>
 

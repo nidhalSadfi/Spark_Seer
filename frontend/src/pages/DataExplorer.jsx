@@ -21,7 +21,14 @@ const COLUMNS = [
   { accessorKey: 'support', header: 'Support', cell: (c) => dash(c.getValue()) },
   { accessorKey: 'z', header: 'z-score', cell: (c) => dash(c.getValue(), one) },
   { accessorKey: 'flag', header: 'Flag' },
+  { accessorKey: 'coverage', header: 'Coverage' },
 ]
+
+const COVERAGE_BADGE = {
+  full: { tone: 'neutral', label: 'Full' },
+  partial: { tone: 'warn', label: 'Partial' },
+  none: { tone: 'neutral', label: 'No data' },
+}
 
 const CSV_COLUMNS = [
   { key: 'year', label: 'year' },
@@ -32,6 +39,7 @@ const CSV_COLUMNS = [
   { key: 'support', label: 'support' },
   { key: 'z', label: 'z' },
   { key: 'flag', label: 'flag' },
+  { key: 'coverage', label: 'coverage' },
 ]
 
 const FLAG_FILTERS = [{ value: 'all', label: 'All months' }, ...Object.entries(FLAGS).map(([value, f]) => ({ value, label: f.label }))]
@@ -138,7 +146,13 @@ export default function DataExplorer() {
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} className="px-4 py-2.5 tabular-nums text-muted">
                           {cell.column.id === 'flag' ? (
-                            <Badge tone={FLAGS[cell.getValue()]?.tone}>{FLAGS[cell.getValue()]?.short ?? cell.getValue()}</Badge>
+                            cell.getValue() == null ? (
+                              '—'
+                            ) : (
+                              <Badge tone={FLAGS[cell.getValue()]?.tone}>{FLAGS[cell.getValue()]?.short ?? cell.getValue()}</Badge>
+                            )
+                          ) : cell.column.id === 'coverage' ? (
+                            <Badge tone={COVERAGE_BADGE[cell.getValue()]?.tone}>{COVERAGE_BADGE[cell.getValue()]?.label ?? cell.getValue()}</Badge>
                           ) : (
                             flexRender(cell.column.columnDef.cell, cell.getContext())
                           )}
@@ -172,7 +186,10 @@ export default function DataExplorer() {
           <strong>Harmonized</strong> is VIIRS-equivalent: MODIS × a fitted ratio before 2012, observed VIIRS from 2012.
           Raw MODIS and VIIRS counts are not directly comparable. VIIRS has no record before 2012 (shown as —).{' '}
           <strong>Support</strong> is the number of MODIS training detections behind the ratio for that calendar month.
-          The z-score is robust (median/MAD) against the same month in other years; |z| ≥ 3 is flagged.
+          The z-score is robust (median/MAD) against the same month in other years; |z| ≥ 3 is flagged.{' '}
+          <strong>Coverage</strong>: <em>Partial</em> = a near-real-time month still being observed (its count will grow);{' '}
+          <em>No data</em> = nothing loaded for that month yet (or it is in the future), shown as — and exported empty, not
+          as 0.
         </Notice>
         <DataSourceNotice />
       </div>

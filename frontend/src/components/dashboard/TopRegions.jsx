@@ -13,6 +13,11 @@ export default function TopRegions({ summaries, limit = 5 }) {
             <span className="text-ink">
               <span className="mr-2 text-faint tabular-nums">{i + 1}</span>
               {r.name}
+              {r.partial && (
+                <span className="ml-1.5 text-[11px] text-yellow-200" title="The latest month is still being observed">
+                  partial
+                </span>
+              )}
             </span>
             <span className="tabular-nums text-muted">
               {fmtInt(r.current)} <span className={`ml-1 text-xs ${anomalyTone(r.anomaly)}`}>{fmtPct(r.anomaly)}</span>

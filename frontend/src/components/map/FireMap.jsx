@@ -67,7 +67,8 @@ function ToolButton({ label, active = false, onClick, children }) {
 /**
  * Live fire map (Leaflet + Esri dark basemap).
  *
- * Shows near-real-time fire clusters (flame markers sized by FRP) over a glow layer of
+ * Shows near-real-time fire clusters (flame markers sized by FRP; from GET /fires/live, or the
+ * illustrative mock feed when the API is unreachable) over a glow layer of
  * individual hotspot detections, with a 24 h time slider, layer toggles, legend and
  * rectangle AOI drawing.
  *
@@ -75,7 +76,8 @@ function ToolButton({ label, active = false, onClick, children }) {
  *   - Reads region + sensor from `useFilters()`; data comes from `useActiveFires()`.
  *   - Drawing / clearing an area calls `setAoi(feature | null)`.
  *
- * Community fire reports (browser-local, see services/reportsStore.js) are drawn on top:
+ * Community fire reports (GET /reports, or browser-local when the API is unreachable; see
+ * services/reportsStore.js) are drawn on top:
  * unverified ones as a "?", confirmed ones as a flame with a tick, dismissed ones not at all.
  *
  * Props:
@@ -100,7 +102,7 @@ export default function FireMap({
   focus = null,
 }) {
   const { sensor, aoi, setAoi } = useFilters()
-  const { data, isLoading } = useActiveFires()
+  const { data, isLoading, error } = useActiveFires()
   const { reports } = useReports()
 
   const wrapRef = useRef(null)
@@ -194,8 +196,8 @@ export default function FireMap({
       const m = L.marker([f.lat, f.lon], {
         icon: fireIcon(f, isSel),
         keyboard: false,
-        title: `${f.name} · ${Math.round(f.frp)} MW`,
-        zIndexOffset: isSel ? 1000 : Math.round(f.frp),
+        title: f.frp == null ? f.name : `${f.name} · ${Math.round(f.frp)} MW`,
+        zIndexOffset: isSel ? 1000 : Math.round(f.frp ?? 0),
       })
       m.on('click', () => selectRef.current?.(f.id))
       ls.markers.addLayer(m)
@@ -376,6 +378,11 @@ export default function FireMap({
       {isLoading && !data && (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center text-sm text-muted">
           Loading active fires…
+        </div>
+      )}
+      {error && !data && (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-sm text-muted">
+          Could not load active fires: {error.message}
         </div>
       )}
 

@@ -9,7 +9,7 @@ from conftest import VALIDATION, YEARS, make_dataset
 
 REQUIRED = {"year", "month", "modis_raw", "viirs_raw", "harmonized", "support", "z", "flag"}
 FLAGS = {"high", "low", "normal", "low_confidence"}
-BIZERTE = "9.0,36.8,10.3,37.4"
+BIZERTE = "8.3,36.0,9.8,37.2"
 
 
 def test_health(client):
@@ -49,7 +49,7 @@ def test_calendar_by_bbox(client):
 
 def test_areas(client):
     areas = client.get("/areas").json()["areas"]
-    assert [a["id"] for a in areas] == ["bizerte", "nw_tunisia", "kabylie", "ne_algeria"]
+    assert [a["id"] for a in areas] == ["bizerte", "kabylie", "ne_algeria", "petite_kabylie"]
     for a in areas:
         x0, y0, x1, y1 = a["bbox"]
         assert a["name"] and x0 < x1 and y0 < y1
@@ -63,7 +63,8 @@ def test_calendar_by_area_matches_bbox(client):
 
 
 def test_calendar_400s(client):
-    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d"]:
+    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d",
+                  "?bbox=170,-50,-170,-40", "?bbox=0,10,10,0", "?bbox=nan,0,1,1"]:  # across 180, swapped, NaN
         assert client.get("/calendar" + query).status_code == 400, query
 
 
@@ -96,13 +97,17 @@ def test_app_starts_without_teammate_routers(monkeypatch):
         importlib.reload(api.main)  # back to the app with the real routers
 
 
-def test_cors_allows_get_and_post_from_any_origin(client):
-    for method in ["GET", "POST"]:
-        r = client.options("/calendar", headers={"Origin": "https://example.org",
-                                                 "Access-Control-Request-Method": method})
-        assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
+def test_cors_allows_the_frontend_methods_and_admin_header_from_any_origin(client):
+    # The reports page sends PATCH/DELETE with X-Admin-Token (spec §10 amendment 2026-11-15).
+    for method in ["GET", "POST", "PATCH", "DELETE"]:
+        r = client.options("/reports/x", headers={"Origin": "https://example.org",
+                                                  "Access-Control-Request-Method": method,
+                                                  "Access-Control-Request-Headers": "x-admin-token,content-type"})
+        assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*", method
+        assert method in r.headers["access-control-allow-methods"]
+        assert "x-admin-token" in r.headers["access-control-allow-headers"].lower()
     r = client.options("/calendar", headers={"Origin": "https://example.org",
-                                             "Access-Control-Request-Method": "DELETE"})
+                                             "Access-Control-Request-Method": "PUT"})
     assert r.status_code == 400
 
 
@@ -120,7 +125,50 @@ def test_optional_fields_passed_through_when_present(tmp_path, monkeypatch):
         assert isinstance(r["MODIS_days"], int)
 
 
-def test_root_redirects_to_docs(client):
+def test_root_redirects_to_demo_page(client):
     r = client.get("/", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"] == "/docs"
-    assert client.get("/").status_code == 200  # /docs itself
+    assert r.status_code == 307 and r.headers["location"] == "/web/demo/"
+    page = client.get("/")
+    assert page.status_code == 200 and "EmberLedger demo" in page.text
+    for asset in ["app.js", "style.css"]:
+        assert client.get(f"/web/demo/{asset}").status_code == 200, asset
+    assert client.get("/docs").status_code == 200
+
+
+def test_meteomatics_routes_mounted_under_prefix(client):
+    paths = app.openapi()["paths"]
+    assert {"/meteomatics/weather", "/meteomatics/weather/map", "/meteomatics/weather/grid-meta",
+            "/meteomatics/weather/cell/{grid_id}", "/meteomatics/weather/point",
+            "/meteomatics/fires/calendar"} <= paths.keys()
+    assert client.get("/meteomatics/weather/grid-meta").json()["cell_count"] == 35  # needs no cache
+
+
+def test_parquet_calendar_coverage_is_full_and_the_default_end_stays_2025(client, monkeypatch):
+    """Without a database (the Render demo): every month is "full", as before `coverage` existed,
+    and the default end is 2025 whatever the parquet's last year (the fixture's is 2015)."""
+    from api import core
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(core, "_utcnow", lambda: datetime(2016, 1, 1, tzinfo=timezone.utc))
+    health = client.get("/health").json()
+    assert (health["data_source"], health["data_end_year"]) == ("parquet", 2025)
+    body = client.get(f"/calendar?bbox={BIZERTE}").json()
+    check_calendar(body, 2001, 2025)
+    assert {r["coverage"] for r in body["months"]} == {"full"}  # even months after "now": the parquet's grid
+    explicit = client.get(f"/calendar?bbox={BIZERTE}&start=2001&end=2025").json()
+    assert body == explicit
+    later = client.get(f"/calendar?bbox={BIZERTE}&start=2014&end=2027").json()
+    check_calendar(later, 2014, 2027)
+    assert {r["coverage"] for r in later["months"]} == {"full"}
+
+
+def test_month_coverage():
+    from api.core import month_coverage
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 11, 15, tzinfo=timezone.utc)
+    cov = {(2026, 10): "partial", (2026, 11): "partial", (2025, 12): "full"}
+    years, months = [2025, 2026, 2026, 2026, 2026, 2027], [12, 1, 10, 11, 12, 1]
+    assert month_coverage(years, months, cov, now) == ["full", "none", "partial", "partial", "none", "none"]
+    assert month_coverage(years, months, None, now) == ["full"] * 6
+    assert month_coverage(years, months, {(2026, 12): "full"}, now)[4] == "none"  # future: never data

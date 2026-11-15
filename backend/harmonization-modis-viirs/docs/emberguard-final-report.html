@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmberGuard AI · Final validated plan · NASA Space Apps Tunis 2026</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper: #f5f5f5; --paper-2: #ececec; --ink: #2d3142; --muted: #4f5d75; --soft: #5a6580;
+      --rule: rgba(45,49,66,0.12); --accent: #bf4520; --accent-tint: rgba(191,69,32,0.08); --link: #2e5aa8;
+      --sans: 'Geist', system-ui, sans-serif;
+      --serif: 'Instrument Serif', 'Noto Serif', 'Times New Roman', serif;
+      --mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+    }
+    body { font-family: var(--sans); background: var(--paper); color: var(--ink); padding: 3rem 2rem 4rem; line-height: 1.55; }
+    .container { max-width: 1080px; margin: 0 auto; }
+    .eyebrow { font-family: var(--mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; }
+    h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(2rem, 3vw + 1rem, 2.9rem); letter-spacing: -0.02em; line-height: 1.08; margin-bottom: 0.6rem; }
+    h2 { font-family: var(--serif); font-weight: 400; font-size: 1.85rem; letter-spacing: -0.01em; line-height: 1.15; margin-bottom: 0.5rem; }
+    h3 { font-size: 0.95rem; font-weight: 600; letter-spacing: -0.005em; }
+    .subtitle { font-size: 1.05rem; color: var(--muted); max-width: 64ch; }
+    section { margin-top: 3.5rem; padding-top: 2rem; border-top: 1px solid var(--rule); }
+    .lead { color: var(--muted); max-width: 70ch; margin-bottom: 1.25rem; }
+    p + p { margin-top: 0.6rem; }
+    strong { font-weight: 600; color: var(--ink); }
+    code { font-family: var(--mono); font-size: 0.82em; background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 0.05em 0.35em; }
+    pre { font-family: var(--mono); font-size: 0.8rem; background: #fff; border: 1px solid var(--rule); border-radius: 6px; padding: 0.8rem 1rem; overflow-x: auto; margin: 0.6rem 0; line-height: 1.6; }
+    .callout { font-family: var(--serif); font-style: italic; font-size: 1.2rem; color: var(--muted); border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.25rem 0; max-width: 64ch; }
+
+    .diagram-container { overflow-x: auto; margin: 1.25rem 0 0.5rem; }
+    svg { width: 100%; display: block; }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0 !important; } }
+    .fig-note { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.04em; color: var(--soft); margin-top: 0.4rem; }
+
+    .cards { display: grid; gap: 1rem; margin-top: 1.25rem; }
+    .cards.three { grid-template-columns: 1.15fr 1fr 0.9fr; }
+    .cards.two { grid-template-columns: 1fr 1fr; }
+    .cards.roles { grid-template-columns: 1.1fr 0.9fr; }
+    @media (max-width: 820px) { .cards.three, .cards.two, .cards.roles { grid-template-columns: 1fr; } }
+    .card { background: #fff; border: 1px solid var(--rule); border-radius: 6px; padding: 1.25rem; }
+    .card.focal { border-color: var(--accent); background: linear-gradient(var(--accent-tint), var(--accent-tint)), #fff; }
+    .card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid rgba(45,49,66,0.08); }
+    .card-header .tag { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; border: 1px solid var(--rule); border-radius: 2px; padding: 0.05rem 0.4rem; color: var(--soft); margin-left: auto; white-space: nowrap; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot.ink { background: var(--ink); } .dot.muted { background: var(--muted); } .dot.coral { background: var(--accent); } .dot.link { background: var(--link); } .dot.soft { background: var(--soft); }
+    .card .big { font-family: var(--serif); font-size: 2.4rem; line-height: 1; margin: 0.2rem 0 0.4rem; }
+    .card .big.accent { color: var(--accent); }
+    .card p, .card li { font-size: 0.875rem; color: var(--muted); }
+    .card ul, .card ol { padding-left: 1.1rem; }
+    .card li { margin-bottom: 0.35rem; }
+    .card li strong, .card p strong { color: var(--ink); }
+    .meta { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.8rem; font-size: 0.82rem; margin-bottom: 0.8rem; }
+    .meta dt { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--soft); padding-top: 0.15rem; }
+    .meta dd { color: var(--ink); }
+    .done { margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px dashed var(--rule); font-size: 0.84rem; color: var(--ink); }
+    .done b { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em; color: var(--accent); font-weight: 500; margin-right: 0.4rem; }
+
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; font-size: 0.86rem; margin-top: 1rem; }
+    th { text-align: left; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 500; color: var(--soft); background: var(--paper-2); padding: 0.6rem 0.8rem; }
+    td { padding: 0.6rem 0.8rem; border-top: 1px solid var(--rule); vertical-align: top; color: var(--ink); }
+    td.mono { font-family: var(--mono); font-size: 0.78rem; white-space: nowrap; color: var(--muted); }
+    tr.hl td { background: var(--accent-tint); }
+    .table-wrap { overflow-x: auto; }
+
+    .dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.25rem; }
+    @media (max-width: 820px) { .dodont { grid-template-columns: 1fr; } }
+    .dodont .card h3 { display: flex; align-items: center; gap: 0.5rem; }
+    .dodont li { margin-bottom: 0.55rem; }
+    .yes li::marker { content: "✓  "; color: var(--ink); }
+    .no li::marker { content: "✕  "; color: var(--accent); }
+    .no { border-color: rgba(191,69,32,0.35); }
+
+    .steps { counter-reset: s; list-style: none; padding-left: 0 !important; }
+    .steps > li { counter-increment: s; position: relative; padding-left: 1.9rem; margin-bottom: 0.55rem; }
+    .steps > li::before { content: counter(s); position: absolute; left: 0; top: 0.05rem; width: 1.25rem; height: 1.25rem; border: 1px solid var(--rule); border-radius: 2px; font-family: var(--mono); font-size: 0.68rem; color: var(--soft); display: flex; align-items: center; justify-content: center; background: var(--paper); }
+
+    .toc { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; margin-top: 1.5rem; font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; }
+    .toc a { color: var(--link); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid rgba(45,49,66,0.10); font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.04em; color: var(--soft); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+      .tier { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.12em; padding: 0.1rem 0.45rem; border-radius: 2px; border: 1px solid; white-space: nowrap; }
+    .t-must { color: var(--accent); border-color: rgba(191,69,32,0.45); }
+    .t-should { color: var(--ink); border-color: rgba(45,49,66,0.35); }
+    .t-could { color: var(--soft); border-color: rgba(45,49,66,0.25); border-style: dashed; }
+    .t-cut { color: var(--soft); border-color: rgba(45,49,66,0.2); text-decoration: line-through; }
+    .v-keep { color: var(--ink); font-weight: 600; } .v-change { color: var(--link); font-weight: 600; } .v-cut { color: var(--accent); font-weight: 600; } .v-add { color: var(--ink); font-weight: 600; }
+    .cards.four { grid-template-columns: 1.1fr 0.9fr; }
+    @media (max-width: 820px) { .cards.four { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <p class="eyebrow">NASA Space Apps 2026 · Tunis · Final report · Sat 14 Nov</p>
+    <h1>EmberGuard AI: the validated final plan</h1>
+    <p class="subtitle">The EmberGuard blueprint, checked against our real data, the 25 hours we have left, and the Tunis rules, then merged with the EmberLedger build that is already running. It covers what we keep, what changes, what we cut, and exactly who does what until the pitch.</p>
+    <nav class="toc">
+      <a href="#verdict">01 Verdict</a><a href="#scope">02 Final scope</a><a href="#data">03 Data reality</a><a href="#proof">04 Proof</a>
+      <a href="#features">05 Features</a><a href="#api">06 API</a><a href="#roles">07 Roles</a><a href="#schedule">08 Schedule</a>
+      <a href="#guardrails">09 Guardrails</a><a href="#rules">10 Event rules</a><a href="#dodont">11 Do / Don't</a><a href="#pitch">12 Pitch</a><a href="#done">13 Definition of done</a><a href="#next">14 Next actions</a>
+    </nav>
+    <div class="cards three">
+      <div class="card focal">
+        <div class="card-header"><span class="dot coral"></span><h3>Verdict on the blueprint</h3></div>
+        <p><strong>Scientifically excellent, too big for 25 hours.</strong> Build the calendar (Feature 1) and a deterministic Evidence Passport (Feature 5) first. Add a light 72-hour weather view if the core works. Make the Prevention shortlist a stretch goal. <strong>Cut the Time Machine.</strong></p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>Hard deadline</h3></div>
+        <p class="big">Sun 16:30</p>
+        <p>Local submission. We aim for <strong>14:30</strong>. Pitch at 17:00: 7 min + 3 min Q&amp;A.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>Proof we already have</h3></div>
+        <p class="big accent">72% → 11.5%</p>
+        <p>Error predicting hidden 2020–2021 VIIRS counts from MODIS, before and after our calibration (first run).</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- 01 ─────────────────────────────────────────────── -->
+  <section id="verdict">
+    <p class="eyebrow">01 · Validation of the blueprint</p>
+    <h2>What we keep, change, add and cut</h2>
+    <p class="lead">Every point below was checked against the real FIRMS files we downloaded, the time left (about 25 hours to a 14:30 submission), and the rules from the Tunis opening ceremony.</p>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Blueprint point</th><th>Verdict</th><th>Why</th></tr>
+      <tr><td>The calendar is the required deliverable; extensions must not weaken it</td><td class="v-keep">Keep</td><td>Exactly right. Relevance is a judging criterion, and the challenge asks for a burning-activity calendar.</td></tr>
+      <tr><td>Scientific guardrails (hotspot ≠ fire, no ignition probabilities, no leakage…)</td><td class="v-keep">Keep</td><td>Adopted as-is in section 09. They protect our Validity score.</td></tr>
+      <tr><td>Pilot region: Bizerte only</td><td class="v-change">Change</td><td>Too few detections. After filtering, all of Tunisia has only ≈ 6,300 MODIS detections in 25 years, so Bizerte alone gives near-empty monthly cells. <strong>Calibrate on northern Tunisia + northern Algeria (north of 34°N)</strong>, then <strong>demo on Bizerte and NW Tunisia</strong>. Sparse cells borrow the regional ratio.</td></tr>
+      <tr><td>Calibration overlap 2022–2024</td><td class="v-change">Change</td><td>Too short, and it sits in the years when the MODIS satellites were drifting. We <strong>fit on 2012–2019 and test on 2020–2021</strong>. Suomi NPP data stopped on 2 Nov 2026, so the overlap is now fixed history.</td></tr>
+      <tr><td>Grid of 20–25 km cells</td><td class="v-change">Change</td><td>Too sparse here. Use <strong>0.5° (≈ 50 km)</strong> for calibration. The map can still show native hotspot points.</td></tr>
+      <tr><td>Ridge or Poisson regression</td><td class="v-keep">Keep, simpler form</td><td>Our per-cell, per-month ratio with shrinkage is a multiplicative count model with partial pooling: explainable in one sentence. A Poisson GLM is an optional comparison only.</td></tr>
+      <tr><td>Hotspot counts <em>and</em> “days with at least one hotspot”</td><td class="v-add">Add</td><td>Good idea and cheap. Active days are less sensitive to pixel size. P1 adds one column.</td></tr>
+      <tr><td>Median + MAD seasonal anomaly, sparse-cell labels</td><td class="v-keep">Keep</td><td>Already built (|z| ≥ 3, months under 10 detections never flagged, <code>low_confidence</code> before 2012).</td></tr>
+      <tr><td>Gas-flare filtering</td><td class="v-add">Add (missing)</td><td>Half of the VIIRS “vegetation fire” detections in Tunisia + Algeria are Saharan gas flares. We keep only north of 34°N.</td></tr>
+      <tr><td>EFFIS Fire Weather Index per cell</td><td class="v-change">Stretch, overlay only</td><td>CEMS says real-time fire products are available <em>only</em> through the EFFIS and GWIS websites. Numeric FWI data needs a Copernicus Climate Data Store account. At most, show the official map layer; never compute our own FWI.</td></tr>
+      <tr><td>Weather forecast (Meteomatics / Open-Meteo)</td><td class="v-keep">Keep, light</td><td>Open-Meteo needs no key. Meteomatics is a Global Offer if claimed. Show raw weather values with timestamps, not a “danger probability”.</td></tr>
+      <tr><td>Prevention Studio (team shortlist)</td><td class="v-change">Stretch</td><td>Without FWI the ranking is weak, and mid-November is off-season (December is the lowest month). Build a <strong>shortlist-lite</strong> only if the core is done by 01:00.</td></tr>
+      <tr><td>Fire Time Machine (blind replay)</td><td class="v-cut">Cut</td><td>Needs archived forecasts and leakage tests, a day of work on its own. Mention it as future work. Our hidden-year test already demonstrates the “test, don't claim” idea.</td></tr>
+      <tr><td>AI Evidence Passport with 3 agents</td><td class="v-change">Simplify</td><td>Template-based passport first (always works). Then <strong>one</strong> LLM call that only rewrites it, plus an automatic check that every number in the text exists in the data. Only if an API key is available.</td></tr>
+      <tr><td>Name “EmberGuard AI”</td><td class="v-change">Team decision</td><td>The name promises prevention and AI. Fine, as long as the pitch is clear that the core is the harmonized calendar and that AI only explains the numbers.</td></tr>
+      <tr><td>Demo: 30-second video storyboard</td><td class="v-change">Pick one</td><td>Only <strong>one</strong> demo link is allowed. Recommended: 7 slides, which we reuse for the pitch. Use the storyboard only if you choose video instead.</td></tr>
+      <tr><td>New folder layout (<code>backend/</code>, <code>frontend/</code>, tests)</td><td class="v-change">Don't restructure now</td><td>Keep the running starter (<code>pipeline/</code>, <code>api/</code>, <code>web/</code>). Add <code>tests/</code> and <code>docs/</code> without moving files.</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- 02 ─────────────────────────────────────────────── -->
+  <section id="scope">
+    <p class="eyebrow">02 · Final scope</p>
+    <h2>One app: a required core, then added value</h2>
+    <p class="lead">The top row must work end to end by Sunday 01:00. The dashed branch is added value. If it fails, the demo still stands.</p>
+    <div class="diagram-container">
+<svg viewBox="0 0 1000 404" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc" style="min-width:1000px">
+<title id="architecture-title">EmberGuard final architecture and owners</title>
+<desc id="architecture-desc">NASA FIRMS data is cleaned, calibrated and served by an API to the website; a 72-hour weather context and an evidence passport branch off the API; each box has one owner.</desc>
+<defs>
+      <marker id="architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+      <marker id="architecture-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+    </defs>
+<rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<text x="20" y="40" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.14em">TOP ROW = REQUIRED CORE · DASHED = ADDED VALUE, ONLY IF THE CORE IS DONE</text>
+<line x1="140" y1="132" x2="186" y2="132" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="150" y="110" width="28" height="12" rx="2" fill="#f5f5f5"/>
+<text x="164" y="119" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CSV</text>
+<line x1="308" y1="132" x2="354" y2="132" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="314" y="110" width="36" height="12" rx="2" fill="#f5f5f5"/>
+<text x="332" y="119" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CELLS</text>
+<line x1="476" y1="132" x2="522" y2="132" stroke="#bf4520" stroke-width="1.2" marker-end="url(#architecture-arrow-accent)"/>
+<rect x="478" y="110" width="44" height="12" rx="2" fill="#f5f5f5"/>
+<text x="500" y="119" fill="#bf4520" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SERIES</text>
+<line x1="644" y1="132" x2="690" y2="132" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="652" y="110" width="32" height="12" rx="2" fill="#f5f5f5"/>
+<text x="668" y="119" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">JSON</text>
+<line x1="812" y1="132" x2="858" y2="132" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="812" y="110" width="48" height="12" rx="2" fill="#f5f5f5"/>
+<text x="836" y="119" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SCREENS</text>
+<line x1="308" y1="268" x2="354" y2="268" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#architecture-arrow)"/>
+<rect x="316" y="246" width="32" height="12" rx="2" fill="#f5f5f5"/>
+<text x="332" y="255" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">72 H</text>
+<path d="M 476 268 L 556 268 Q 564 268 564 260 L 564 170" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#architecture-arrow)"/>
+<rect x="492" y="246" width="48" height="12" rx="2" fill="#f5f5f5"/>
+<text x="516" y="255" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CONTEXT</text>
+<path d="M 604 168 L 604 260 Q 604 268 612 268 L 690 268" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="634" y="246" width="36" height="12" rx="2" fill="#f5f5f5"/>
+<text x="652" y="255" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TOOLS</text>
+<line x1="752" y1="232" x2="752" y2="170" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<rect x="20" y="96" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="20" y="96" width="120" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="28" y="104" width="28" height="12" rx="2" fill="none" stroke="#5a6580" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="42.0" y="113" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">NASA</text>
+<text x="80.0" y="138" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">NASA FIRMS</text>
+<text x="80.0" y="154" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">MODIS + VIIRS</text>
+<text x="80.0" y="86" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">DOWNLOADED</text>
+<rect x="188" y="96" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="188" y="96" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="196" y="104" width="20" height="12" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="206.0" y="113" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P1</text>
+<text x="248.0" y="138" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Clean &amp; grid</text>
+<text x="248.0" y="154" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ingest.py</text>
+<text x="248.0" y="86" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">SAT 15:00</text>
+<rect x="356" y="96" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="356" y="96" width="120" height="72" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.2"/>
+<rect x="364" y="104" width="20" height="12" rx="2" fill="none" stroke="#bf4520" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="374.0" y="113" fill="#bf4520" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P2</text>
+<text x="416.0" y="138" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Calibrate &amp; test</text>
+<text x="416.0" y="154" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">calibrate.py</text>
+<text x="416.0" y="86" fill="#bf4520" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">SAT 19:30</text>
+<rect x="524" y="96" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="524" y="96" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="532" y="104" width="20" height="12" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="542.0" y="113" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P3</text>
+<text x="584.0" y="138" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">API server</text>
+<text x="584.0" y="154" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">FastAPI</text>
+<text x="584.0" y="86" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">ONLINE SUN 09:00</text>
+<rect x="692" y="96" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="692" y="96" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="700" y="104" width="20" height="12" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="710.0" y="113" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P4</text>
+<text x="752.0" y="138" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Website</text>
+<text x="752.0" y="154" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">React + Leaflet</text>
+<text x="752.0" y="86" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">DEMO SUN 01:00</text>
+<rect x="860" y="96" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="860" y="96" width="120" height="72" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="868" y="104" width="20" height="12" rx="2" fill="none" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="878.0" y="113" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P6</text>
+<text x="920.0" y="138" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Pitch &amp; submit</text>
+<text x="920.0" y="154" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">7 slides + page</text>
+<text x="920.0" y="86" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">SENT SUN 14:30</text>
+<rect x="188" y="232" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="188" y="232" width="120" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="196" y="240" width="24" height="12" rx="2" fill="none" stroke="#5a6580" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="208.0" y="249" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EXT</text>
+<text x="248.0" y="274" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Open-Meteo</text>
+<text x="248.0" y="290" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">72 h forecast</text>
+<rect x="356" y="232" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="356" y="232" width="120" height="72" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="364" y="240" width="20" height="12" rx="2" fill="none" stroke="#5a6580" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="374.0" y="249" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P1</text>
+<text x="416.0" y="274" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Weather context</text>
+<text x="416.0" y="290" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">weather.py</text>
+<text x="416.0" y="322" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">SUN 01:00 · OPTIONAL</text>
+<rect x="692" y="232" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="692" y="232" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="700" y="240" width="20" height="12" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="710.0" y="249" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">P5</text>
+<text x="752.0" y="274" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Passport</text>
+<text x="752.0" y="290" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">evidence report</text>
+<text x="752.0" y="322" fill="#5a6580" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">SUN 01:00</text>
+<line x1="20" y1="340" x2="980" y2="340" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="20" y="368" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="92" y="359" width="14" height="10" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="112" y="368" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">External data</text>
+<rect x="228" y="359" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="248" y="368" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Required step</text>
+<rect x="364" y="359" width="14" height="10" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="384" y="368" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Core science</text>
+<rect x="500" y="359" width="14" height="10" rx="2" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="3,2"/>
+<text x="520" y="368" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Added value</text>
+<rect x="636" y="359" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="656" y="368" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Delivery</text>
+<line x1="772" y1="364" x2="792" y2="364" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+<text x="800" y="368" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Hand-off</text>
+</svg>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Tier</th><th>Feature</th><th>Must work by</th><th>If it slips</th></tr>
+      <tr class="hl"><td><span class="tier t-must">MUST</span></td><td><strong>Fire Memory</strong>: harmonized calendar, Sensor Truth Mode (raw MODIS / raw VIIRS / harmonized), anomalies, accuracy panel</td><td class="mono">Sun 01:00</td><td>Everyone helps. Nothing else matters until this works.</td></tr>
+      <tr class="hl"><td><span class="tier t-must">MUST</span></td><td><strong>Evidence Passport (template)</strong>: numbers, sources, uncertainty and limits for any month + area</td><td class="mono">Sun 01:00</td><td>Show the month-details panel only.</td></tr>
+      <tr><td><span class="tier t-should">SHOULD</span></td><td><strong>Weather context</strong>: next 72 h of Open-Meteo weather for the demo areas, next to the historical season</td><td class="mono">Sun 09:00</td><td>Drop it and mention it as next step.</td></tr>
+      <tr><td><span class="tier t-should">SHOULD</span></td><td><strong>AI wording</strong> on top of the template passport, with the number check</td><td class="mono">Sun 09:00</td><td>Keep the template passport.</td></tr>
+      <tr><td><span class="tier t-could">COULD</span></td><td><strong>Shortlist-lite</strong>: “I have k teams”, giving the top-k cells with reasons and what's left out</td><td class="mono">Sun 09:00</td><td>Drop it, and put a mock-up on slide 7 labelled “next step”.</td></tr>
+      <tr><td><span class="tier t-could">COULD</span></td><td>EFFIS FWI map layer (visual overlay only)</td><td class="mono">Sun 09:00</td><td>Drop it.</td></tr>
+      <tr><td><span class="tier t-cut">CUT</span></td><td>Fire Time Machine, ML danger model, multi-agent orchestration, OSM / WorldPop / NDVI / SMAP</td><td class="mono">—</td><td>Future work in the pitch.</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- 03 ─────────────────────────────────────────────── -->
+  <section id="data">
+    <p class="eyebrow">03 · Data reality check</p>
+    <h2>What the real files told us</h2>
+    <p class="lead">MODIS (since 2001) has 1 km pixels; VIIRS (since 2012) has 375 m pixels and sees about 3.5× more hotspots. We learn the ratio where both overlap, test it on hidden years, and use it to convert the old MODIS years.</p>
+    <div class="diagram-container">
+<svg viewBox="0 0 1000 392" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="data-years-title data-years-desc" style="min-width:1000px">
+<title id="data-years-title">Satellite records and the conversion method</title>
+<desc id="data-years-desc">MODIS runs from 2001 and VIIRS from 2012; the ratio is learned on 2012-2019, tested on 2020-2021 and used to convert 2001-2011.</desc>
+<defs>
+      <marker id="data-years-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+      <marker id="data-years-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+    </defs>
+<rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<rect x="12" y="180" width="976" height="140" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="1"/>
+<text x="24" y="193" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.18em">OUR METHOD</text>
+<rect x="12" y="72" width="976" height="100" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="1"/>
+<text x="24" y="85" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.18em">SATELLITE RECORDS</text>
+<text x="200.0" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2001</text>
+<text x="316.9" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2005</text>
+<text x="463.1" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2010</text>
+<text x="609.2" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2015</text>
+<text x="755.4" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2020</text>
+<text x="901.5" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2025</text>
+<line x1="200" y1="64" x2="960" y2="64" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<line x1="955.1" y1="68" x2="955.1" y2="320" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="959.1" y="334" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.10em">S-NPP STOPS 2 NOV 2026</text>
+<text x="188" y="112" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">MODIS (Terra + Aqua)</text>
+<rect x="200.0" y="96" width="730.8" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="200.0" y="96" width="730.8" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="208.0" y="112" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">1 km pixels · fewer fires seen</text>
+<text x="188" y="152" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">VIIRS Suomi NPP</text>
+<rect x="521.5" y="136" width="409.2" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="521.5" y="136" width="409.2" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="529.5" y="152" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">375 m pixels · about 3.5x more fires</text>
+<text x="188" y="220" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">1 · Learn the ratio</text>
+<rect x="521.5" y="204" width="233.8" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="521.5" y="204" width="233.8" height="24" rx="4" fill="rgba(191,69,32,0.12)" stroke="#bf4520" stroke-width="1"/>
+<text x="529.5" y="220" fill="#bf4520" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Learn the ratio on the overlap</text>
+<text x="188" y="260" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">2 · Hidden test</text>
+<rect x="755.4" y="244" width="58.5" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="755.4" y="244" width="58.5" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="821.8" y="260" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Predict, then compare</text>
+<text x="188" y="300" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">3 · Convert old years</text>
+<rect x="200.0" y="284" width="321.5" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="200.0" y="284" width="321.5" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="208.0" y="300" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">MODIS x ratio = VIIRS-equivalent</text>
+<line x1="20" y1="352" x2="980" y2="352" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="20" y="374" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="100" y="365" width="14" height="10" rx="2" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="120" y="374" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Data period or step</text>
+<rect x="320" y="365" width="14" height="10" rx="2" fill="rgba(191,69,32,0.12)" stroke="#bf4520" stroke-width="1"/>
+<text x="340" y="374" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Key step: learning the ratio</text>
+<line x1="547" y1="363" x2="547" y2="377" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="560" y="374" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Event</text>
+</svg>
+    </div>
+    <div class="cards three">
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>Data already downloaded</h3></div>
+        <ul>
+          <li>NASA FIRMS country files, <strong>Tunisia + Algeria</strong>.</li>
+          <li>MODIS 2001–2025 · VIIRS Suomi NPP 2012–2025.</li>
+          <li>4 CSV files, 127 MB total (Algeria VIIRS is 105 MB).</li>
+          <li>Columns as expected: satellite <code>N</code>, confidence <code>l/n/h</code>, <code>type</code>.</li>
+          <li>The MODIS files report <code>version 6.2</code>: cite that.</li>
+        </ul>
+      </div>
+      <div class="card focal">
+        <div class="card-header"><span class="dot coral"></span><h3>Two traps</h3></div>
+        <p><strong>Gas flares:</strong> about 50% of the VIIRS “vegetation fire” detections are on Saharan oil fields (≈ 31.5°N, 5.5–6°E). Keep only north of 34°N.</p>
+        <p><strong>Sparsity:</strong> Tunisia alone is thin (≈ 6,300 filtered MODIS detections in 25 years). Calibrate on the whole northern belt, demo on Bizerte.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>Fire season, north of 34°N (VIIRS)</h3></div>
+        <ul>
+          <li><strong>August</strong> ≈ 62,300 · <strong>July</strong> ≈ 27,500</li>
+          <li><strong>September</strong> ≈ 14,600 · <strong>October</strong> ≈ 10,600</li>
+          <li><strong>December</strong> (lowest) ≈ 1,400</li>
+          <li>Total ≈ 137,000 detections, 2012–2025</li>
+          <li><strong>So:</strong> a 72-hour view in mid-November will look calm. That is honest, and we say so.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 ─────────────────────────────────────────────── -->
+  <section id="proof">
+    <p class="eyebrow">04 · The proof</p>
+    <h2>Hide two years, predict them, measure the error</h2>
+    <p class="lead">This is the blueprint's “real held-out calibration comparison” acceptance test, already passed on the first run. P2 must reproduce it with <code>calibrate.py</code> before it goes on a slide.</p>
+    <div class="diagram-container">
+<svg viewBox="0 0 1000 312" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="proof-title proof-desc" style="min-width:1000px">
+<title id="proof-title">Prediction error on hidden years</title>
+<desc id="proof-desc">Predicting hidden 2020-2021 VIIRS counts from MODIS: 72.1% error with no conversion, 13.7% with one global ratio, 11.5% with our per-area per-month ratio.</desc>
+<defs>
+      <marker id="proof-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+      <marker id="proof-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+    </defs>
+<rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<line x1="248.0" y1="48" x2="248.0" y2="244" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<text x="248.0" y="264" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">0%</text>
+<line x1="426.0" y1="48" x2="426.0" y2="244" stroke="rgba(45,49,66,0.08)" stroke-width="0.8"/>
+<text x="426.0" y="264" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">20%</text>
+<line x1="604.0" y1="48" x2="604.0" y2="244" stroke="rgba(45,49,66,0.08)" stroke-width="0.8"/>
+<text x="604.0" y="264" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">40%</text>
+<line x1="782.0" y1="48" x2="782.0" y2="244" stroke="rgba(45,49,66,0.08)" stroke-width="0.8"/>
+<text x="782.0" y="264" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">60%</text>
+<line x1="960.0" y1="48" x2="960.0" y2="244" stroke="rgba(45,49,66,0.08)" stroke-width="0.8"/>
+<text x="960.0" y="264" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">80%</text>
+<text x="604" y="284" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">AVERAGE MONTHLY ERROR ON HIDDEN 2020–2021 DATA (LOWER IS BETTER)</text>
+<text x="236" y="84" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">No conversion</text>
+<rect x="248" y="68" width="641.7" height="24" fill="#f5f5f5"/>
+<rect x="248" y="68" width="641.7" height="24" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="897.7" y="84" fill="#4f5d75" font-size="9" font-weight="600" font-family="'Geist Mono', monospace">72.1%</text>
+<text x="236" y="144" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">One ratio for everything</text>
+<rect x="248" y="128" width="121.9" height="24" fill="#f5f5f5"/>
+<rect x="248" y="128" width="121.9" height="24" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="377.9" y="144" fill="#4f5d75" font-size="9" font-weight="600" font-family="'Geist Mono', monospace">13.7%</text>
+<text x="236" y="204" fill="#bf4520" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">Our method: per area, per month</text>
+<rect x="248" y="188" width="102.4" height="24" fill="#f5f5f5"/>
+<rect x="248" y="188" width="102.4" height="24" fill="rgba(191,69,32,0.12)" stroke="#bf4520" stroke-width="1"/>
+<text x="358.4" y="204" fill="#bf4520" font-size="9" font-weight="600" font-family="'Geist Mono', monospace">11.5%</text>
+<text x="20" y="304" fill="#5a6580" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">Tunisia + Algeria north of 34°N · fit 2012–2019 · 24 test months · first run, to be reproduced with calibrate.py</text>
+</svg>
+    </div>
+    <p class="callout">“Better alignment with the VIIRS reference, not true fire-count accuracy.” Say it this way, as the blueprint recommends.</p>
+  </section>
+
+  <!-- 05 ─────────────────────────────────────────────── -->
+  <section id="features">
+    <p class="eyebrow">05 · Feature specs (final)</p>
+    <h2>Inputs, steps, output and acceptance test for each feature</h2>
+    <div class="cards four">
+      <div class="card focal">
+        <div class="card-header"><span class="dot coral"></span><h3>1 · Fire Memory: harmonized calendar</h3><span class="tier t-must">MUST</span></div>
+        <dl class="meta"><dt>Inputs</dt><dd>FIRMS MODIS + VIIRS S-NPP, filtered; 0.5° grid; north of 34°N</dd><dt>Owners</dt><dd>P1 data · P2 science · P3 API · P4 UI</dd></dl>
+        <ol class="steps">
+          <li>Count detections <strong>and active days</strong> per cell, month and sensor.</li>
+          <li>Learn the ratio per cell and month on 2012–2019, with shrinkage toward the regional ratio.</li>
+          <li>Test on hidden 2020–2021: no correction vs one ratio vs ours.</li>
+          <li>Convert 2001–2011 MODIS into VIIRS terms with a low / high range.</li>
+          <li>Flag anomalies against the same month in other years (median / MAD, |z| ≥ 3).</li>
+          <li>UI: calendar plus <strong>Sensor Truth Mode</strong> with 3 buttons: raw MODIS, raw VIIRS, harmonized.</li>
+        </ol>
+        <p class="done"><b>ACCEPTANCE</b>A judge picks Bizerte, switches the 3 modes, opens one unusual month and sees the real hidden-year comparison. If calibration is weak somewhere, the UI says so.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>5 · Evidence Passport</h3><span class="tier t-must">MUST</span></div>
+        <dl class="meta"><dt>Inputs</dt><dd>Outputs of Feature 1 (+ weather if present), metadata, validation numbers</dd><dt>Owner</dt><dd>P5</dd></dl>
+        <ol class="steps">
+          <li><strong>Template first:</strong> area, month, raw counts per sensor, harmonized value, how unusual (z), data support, validation error, sources, limitations.</li>
+          <li>Always state what is <em>not</em> known (“not enough data” on <code>low_confidence</code>).</li>
+          <li>Optional AI: one call rewrites the template in 3 plain sentences.</li>
+          <li><strong>Number check:</strong> every number in the AI text must appear in the JSON, or we show the template instead.</li>
+          <li>API key stays on the server.</li>
+        </ol>
+        <p class="done"><b>ACCEPTANCE</b>Every number in the passport traces to stored data; missing data is reported, never invented.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>3 · Weather context (light)</h3><span class="tier t-should">SHOULD</span></div>
+        <dl class="meta"><dt>Inputs</dt><dd>Open-Meteo hourly forecast at each demo area's centre</dd><dt>Owner</dt><dd>P1 (after 15:00) · P3 endpoint · P4 panel</dd></dl>
+        <ol class="steps">
+          <li>For each demo area, fetch 72 h of temperature, humidity, wind gusts and rain; store <strong>issue time and valid time</strong>.</li>
+          <li>Daily summary: max temperature, min humidity, max gust, total rain.</li>
+          <li>Show it <strong>next to</strong> the historical activity for this month, never merged into one score.</li>
+          <li>Label: “weather context, not an official fire-danger index”.</li>
+        </ol>
+        <p class="done"><b>ACCEPTANCE</b>Click an area → real forecast values with source and timestamps, plus a historical comparison. No invented probabilities.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot soft"></span><h3>4 · Shortlist-lite</h3><span class="tier t-could">COULD</span></div>
+        <dl class="meta"><dt>Inputs</dt><dd>Calendar history, weather context, “k teams” slider</dd><dt>Owner</dt><dd>P2, only after the core works</dd></dl>
+        <ol class="steps">
+          <li>Candidates: grid cells in the selected region.</li>
+          <li>Sort by historical activity for the coming month; break ties by forecast humidity (drier first).</li>
+          <li>Pick the top k (k = number of teams). Show the reason for each, and the cells left out.</li>
+          <li>Wording: “monitoring priorities”, never “dispatch”.</li>
+        </ol>
+        <p class="done"><b>ACCEPTANCE</b>Changing k or the objective changes the list predictably; every pick has a written reason.</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="card-header"><span class="dot soft"></span><h3>2 · Fire Time Machine</h3><span class="tier t-cut">CUT</span></div>
+      <p>Cut from this hackathon: it needs forecasts archived before each replay date and strict leakage tests. In the pitch, present it as the next step: “replay past dates without seeing the future, and compare against an FWI-only baseline”.</p>
+    </div>
+  </section>
+
+  <!-- 06 ─────────────────────────────────────────────── -->
+  <section id="api">
+    <p class="eyebrow">06 · API contract</p>
+    <h2>Six endpoints, frozen once agreed</h2>
+    <p class="lead">This merges the blueprint's endpoint list with the running starter. <code>/calendar</code> already returns the raw counts, so a separate “sensor compare” endpoint isn't needed. P3 owns this table; any change goes through P3.</p>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Endpoint</th><th>Tier</th><th>Input</th><th>Returns</th><th>Owner</th></tr>
+      <tr><td class="mono">GET /areas</td><td><span class="tier t-must">MUST</span></td><td>—</td><td>Demo areas: name + box (Bizerte, NW Tunisia, Kabylie, NE Algeria)</td><td>P3 (list from P1)</td></tr>
+      <tr><td class="mono">GET /calendar</td><td><span class="tier t-must">MUST</span></td><td><code>bbox</code>, <code>start</code>, <code>end</code></td><td>Per month: <code>modis_raw</code>, <code>viirs_raw</code>, <code>harmonized</code>, <code>low</code>/<code>high</code>, <code>z</code>, <code>flag</code>, <code>support</code>, active days; meta: critical months, validation</td><td>P3</td></tr>
+      <tr><td class="mono">GET /validation</td><td><span class="tier t-must">MUST</span></td><td>—</td><td>Three error numbers + predicted vs actual series 2020–2021</td><td>P3 (data from P2)</td></tr>
+      <tr><td class="mono">POST /investigate</td><td><span class="tier t-must">MUST</span></td><td><code>bbox</code>, <code>year</code>, <code>month</code></td><td>Evidence Passport JSON (+ optional AI text that passed the number check)</td><td>P5</td></tr>
+      <tr><td class="mono">GET /weather</td><td><span class="tier t-should">SHOULD</span></td><td><code>area</code></td><td>3 daily summaries + issue time + source</td><td>P1 / P3</td></tr>
+      <tr><td class="mono">POST /shortlist</td><td><span class="tier t-could">COULD</span></td><td><code>area</code>, <code>teams</code></td><td>Selected cells + reasons + unselected + limitations</td><td>P2</td></tr>
+    </table>
+    </div>
+    <p class="fig-note">Bizerte demo box, approximate (lon/lat): 9.0, 36.8, 10.3, 37.4 · NW Tunisia: 8.3, 36.2, 9.2, 37.0. P1 adjusts both on the FIRMS map.</p>
+  </section>
+
+  <!-- 07 ─────────────────────────────────────────────── -->
+  <section id="roles">
+    <p class="eyebrow">07 · Who does what</p>
+    <h2>Six roles, merged from both plans</h2>
+    <p class="lead">This combines our roles with the blueprint's (data engineer, science/ML, weather, backend/AI, frontend, product lead). Weather moves to P1 once the data is clean, so nobody idles.</p>
+    <div class="cards roles">
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>P1 · Data engineer, then weather</h3><span class="tag">ingest.py · weather.py</span></div>
+        <ol class="steps">
+          <li>4 CSVs into <code>data/raw/</code> → <code>python pipeline/ingest.py data/raw data/cells.parquet 34</code>.</li>
+          <li>Add active days: <code>count(DISTINCT acq_date) AS days</code> next to <code>count(*) AS n</code>.</li>
+          <li>Check: VIIRS ≈ 137,000 detections, years 2012–2025; MODIS 2001–2025.</li>
+          <li>Finalise the 4 demo boxes (Bizerte first) and send them to P3.</li>
+          <li>From 15:00: <code>weather.py</code> using Open-Meteo for each demo-area centre, with timestamps.</li>
+          <li>Sunday morning: test the app like a judge with P6.</li>
+        </ol>
+        <p class="done"><b>DONE WHEN</b>cells.parquet with counts + days; demo boxes sent; weather JSON for 4 areas.</p>
+      </div>
+      <div class="card focal">
+        <div class="card-header"><span class="dot coral"></span><h3>P2 · Science and evaluation</h3><span class="tag">calibrate.py</span></div>
+        <ol class="steps">
+          <li>Run <code>calibrate.py</code>; reproduce ≈ 72% / 14% / 11.5%.</li>
+          <li>Repeat the test with active days instead of counts; report both.</li>
+          <li>Add the predicted vs actual series and pre-2012 low / high range to the outputs.</li>
+          <li>Write the method in 5 plain lines + the honest limits for P6.</li>
+          <li>Only after 01:00 and if the core works: shortlist-lite.</li>
+        </ol>
+        <p class="done"><b>DONE WHEN</b>numbers reproduced; validation.json complete; method text delivered.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>P3 · Backend, deploy, repo owner</h3><span class="tag">api/</span></div>
+        <ol class="steps">
+          <li>Now: repo created, starter pushed, 6 members added. Only P3 merges to <code>main</code>.</li>
+          <li>Endpoints from section 06: <code>/areas</code>, <code>/calendar</code>, <code>/validation</code>, then <code>/weather</code>.</li>
+          <li>Deploy online (Render / Railway / a Global Offer); share the URL.</li>
+          <li>Save a JSON backup of every demo-area response for the pitch.</li>
+          <li>Keep the README contract current.</li>
+        </ol>
+        <p class="done"><b>DONE WHEN</b>public URL serves real data; backups exist.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot link"></span><h3>P4 · Frontend</h3><span class="tag">web/</span></div>
+        <ol class="steps">
+          <li>Build on <code>mock_calendar.json</code> now; switch to the API later.</li>
+          <li>Map left (pick an area or draw a box); calendar right (years × months).</li>
+          <li><strong>Sensor Truth Mode</strong>: raw MODIS / raw VIIRS / harmonized. Make this moment perfect.</li>
+          <li>Flags: red = high, blue = low, grey stripes = low confidence; marker on the fire season.</li>
+          <li>Click a month → opens P5's passport. Weather panel if <code>/weather</code> exists.</li>
+        </ol>
+        <p class="done"><b>DONE WHEN</b>Bizerte → calendar → 3 modes → click a month, all working on real data.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot link"></span><h3>P5 · Evidence Passport + trust panel</h3><span class="tag">api/explain.py</span></div>
+        <ol class="steps">
+          <li>Trust panel: the 3-bar accuracy chart + predicted vs actual line.</li>
+          <li><code>POST /investigate</code>: template passport from the data (works without AI).</li>
+          <li>Optional AI rewrite + automatic number check; fall back to the template on any mismatch.</li>
+          <li>Confirm early whether an API key is actually available. Don't assume.</li>
+          <li>Tell P6 which model was used.</li>
+        </ol>
+        <p class="done"><b>DONE WHEN</b>any month + area gives a passport where every number is traceable.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>P6 · Product lead, story, submission</h3><span class="tag">REFERENCES.md</span></div>
+        <ol class="steps">
+          <li>Now: team page (all 6, not waitlisted), the 20:00 rule, Connect question to the challenge experts.</li>
+          <li><code>REFERENCES.md</code>: FIRMS citation, Open-Meteo, every library, every AI use.</li>
+          <li>Get the team to agree on the name (EmberGuard AI or EmberLedger) <strong>today</strong>.</li>
+          <li>7 slides by Sun 12:00, project page text (50–200-word summary), 7-minute script, Q&amp;A sheet.</li>
+          <li>Sun 14:30: test links in a private window → Submit for Judging.</li>
+        </ol>
+        <p class="done"><b>DONE WHEN</b>submitted at 14:30, every link public, every source credited.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 ─────────────────────────────────────────────── -->
+  <section id="schedule">
+    <p class="eyebrow">08 · Schedule</p>
+    <h2>From Saturday noon to the pitch</h2>
+    <p class="lead">Build in parallel on mock data; join for the first full demo by <strong>01:00</strong>; add value only after that; freeze at <strong>09:00</strong>.</p>
+    <div class="diagram-container">
+<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="schedule-title schedule-desc" style="min-width:1000px">
+<title id="schedule-title">EmberGuard team schedule to the pitch</title>
+<desc id="schedule-desc">Six members build in parallel, join for a first full demo by 01:00, freeze at 09:00, submit at 14:30 and pitch at 17:00.</desc>
+<defs>
+      <marker id="schedule-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+      <marker id="schedule-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+    </defs>
+<rect width="100%" height="100%" fill="#f5f5f5"/>
+
+<rect x="12" y="488" width="976" height="100" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="1"/>
+<text x="24" y="501" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.18em">SHIP</text>
+<rect x="12" y="300" width="976" height="180" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="1"/>
+<text x="24" y="313" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.18em">JOIN, THEN ADD VALUE</text>
+<rect x="12" y="72" width="976" height="220" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="1"/>
+<text x="24" y="85" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.18em">REQUIRED CORE</text>
+<text x="200.0" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SAT 12:00</text>
+<text x="301.3" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">16:00</text>
+<text x="402.7" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">20:00</text>
+<text x="504.0" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">00:00</text>
+<text x="605.3" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SUN 04:00</text>
+<text x="706.7" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">08:00</text>
+<text x="808.0" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">12:00</text>
+<text x="909.3" y="56" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">16:00</text>
+<line x1="200" y1="64" x2="960" y2="64" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<line x1="402.7" y1="68" x2="402.7" y2="588" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="402.7" y="602" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">DOORS 20:00</text>
+<line x1="732.0" y1="68" x2="732.0" y2="588" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="732.0" y="602" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">FREEZE 09:00</text>
+<line x1="871.3" y1="68" x2="871.3" y2="588" stroke="#bf4520" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="871.3" y="602" fill="#bf4520" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">SUBMIT 14:30</text>
+<line x1="934.7" y1="68" x2="934.7" y2="588" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="934.7" y="602" fill="#4f5d75" font-size="7" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PITCH 17:00</text>
+<text x="188" y="112" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P1 · Data</text>
+<rect x="212.7" y="96" width="63.3" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="212.7" y="96" width="63.3" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="284.0" y="112" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Clean + grid</text>
+<text x="188" y="152" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P2 · Science</text>
+<rect x="225.3" y="136" width="164.7" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="225.3" y="136" width="164.7" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="398.0" y="152" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Ratio, hidden test, anomalies</text>
+<text x="188" y="192" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P3 · Backend</text>
+<rect x="225.3" y="176" width="506.7" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="225.3" y="176" width="506.7" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="233.3" y="192" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">API, deploy online, backup JSON</text>
+<text x="188" y="232" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P4 · Website</text>
+<rect x="225.3" y="216" width="506.7" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="225.3" y="216" width="506.7" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="233.3" y="232" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Calendar, Sensor Truth Mode, map</text>
+<text x="188" y="272" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P5 · Passport</text>
+<rect x="225.3" y="256" width="506.7" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="225.3" y="256" width="506.7" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="233.3" y="272" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Deterministic passport, then AI wording</text>
+<text x="188" y="340" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">All · First full demo</text>
+<rect x="390.0" y="324" width="139.3" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="390.0" y="324" width="139.3" height="24" rx="4" fill="rgba(191,69,32,0.12)" stroke="#bf4520" stroke-width="1"/>
+<text x="398.0" y="340" fill="#bf4520" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Area → real calendar</text>
+<text x="188" y="380" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P1 · Weather</text>
+<rect x="276.0" y="364" width="253.3" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="276.0" y="364" width="253.3" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="284.0" y="380" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Open-Meteo 72 h context</text>
+<text x="188" y="420" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P2 · Shortlist</text>
+<rect x="529.3" y="404" width="202.7" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="529.3" y="404" width="202.7" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="537.3" y="420" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Only if core works</text>
+<text x="188" y="460" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P1 + P6 · Testing</text>
+<rect x="630.7" y="444" width="177.3" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="630.7" y="444" width="177.3" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="638.7" y="460" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Test like a judge</text>
+<text x="188" y="528" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">P6 · Story</text>
+<rect x="225.3" y="512" width="646.0" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="225.3" y="512" width="646.0" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="233.3" y="528" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif">Rules, references, 7 slides, project page</text>
+<text x="188" y="568" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="end">All · Rehearse x3</text>
+<rect x="871.3" y="552" width="50.7" height="24" rx="4" fill="#f5f5f5"/>
+<rect x="871.3" y="552" width="50.7" height="24" rx="4" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="879.3" y="568" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif"></text>
+<line x1="20" y1="620" x2="980" y2="620" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="20" y="642" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="100" y="633" width="14" height="10" rx="2" fill="rgba(79,93,117,0.15)" stroke="#4f5d75" stroke-width="1"/>
+<text x="120" y="642" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Work block</text>
+<rect x="320" y="633" width="14" height="10" rx="2" fill="rgba(191,69,32,0.12)" stroke="#bf4520" stroke-width="1"/>
+<text x="340" y="642" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Critical milestone</text>
+<line x1="547" y1="631" x2="547" y2="645" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="560" y="642" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Deadline or rule</text>
+</svg>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Checkpoint</th><th>What must be true</th><th>Owner</th></tr>
+      <tr><td class="mono">Sat 15:00</td><td>Repo shared · cells.parquet with counts + days · website on mock data · team page checked</td><td>P1, P3, P4, P6</td></tr>
+      <tr><td class="mono">Sat 19:30</td><td>Calibration + hidden-year numbers · API on real data · template passport · overnight roster</td><td>P2, P3, P5, all</td></tr>
+      <tr class="hl"><td class="mono">Sun 01:00</td><td><strong>MUST tier works end to end</strong>: Bizerte → calendar → 3 sensor modes → passport. Back up, record the screen.</td><td>P3, P4, P5</td></tr>
+      <tr><td class="mono">Sun 09:00</td><td><strong>Feature freeze</strong> · online at a public URL · SHOULD tier in or dropped</td><td>All</td></tr>
+      <tr><td class="mono">Sun 12:00</td><td>7 slides + project page text ready</td><td>P6</td></tr>
+      <tr class="hl"><td class="mono">Sun 14:30</td><td><strong>Submitted</strong> (official deadline 16:30)</td><td>P6</td></tr>
+      <tr><td class="mono">Sun 17:00</td><td>Pitch: 7 min + 3 min Q&amp;A</td><td>All</td></tr>
+    </table>
+    </div>
+    <div class="cards two">
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>Overnight: at least 3 on site, always</h3></div>
+        <div class="table-wrap"><table style="margin-top:0">
+          <tr><th>Time</th><th>Working</th><th>Resting on site</th></tr>
+          <tr><td class="mono">Sat 20:00–Sun 01:00</td><td>P2, P3, P4, P5</td><td>P1, P6</td></tr>
+          <tr><td class="mono">Sun 01:00–05:00</td><td>P1, P6, + P3 or P4</td><td>the rest</td></tr>
+          <tr><td class="mono">Sun 05:00–09:00</td><td>P2, P4, P5</td><td>P1, P3, P6</td></tr>
+        </table></div>
+        <p style="margin-top:0.7rem">P1's weather work runs 15:00–20:00 and 01:00–05:00. Anyone leaving goes <strong>before 20:00</strong>.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>Working rules</h3></div>
+        <ul>
+          <li><strong>Stand-ups</strong> (5 min) at 15:00, 19:30, 01:00, 09:00, 12:00.</li>
+          <li><strong>Integration rule</strong> (from the blueprint): agree on <code>bbox</code>, dates and JSON shapes before coding; each person commits a small sample JSON for their module.</li>
+          <li><strong>One repo, short branches</strong>; only P3 merges; <code>main</code> always runs.</li>
+          <li><strong>Blocked 20 minutes?</strong> Say it in the team chat.</li>
+          <li><strong>Log every AI use and source</strong> as it happens.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 ─────────────────────────────────────────────── -->
+  <section id="guardrails">
+    <p class="eyebrow">09 · Scientific guardrails</p>
+    <h2>What we never claim</h2>
+    <p class="lead">The blueprint's guardrails plus what our data taught us. Every screen, slide and passport follows these.</p>
+    <div class="cards two">
+      <div class="card">
+        <div class="card-header"><span class="dot coral"></span><h3>From the blueprint</h3></div>
+        <ol class="steps">
+          <li>A hotspot is a thermal detection, not an individual wildfire.</li>
+          <li>No detection does not mean “definitely no fire”.</li>
+          <li>A grid aggregate alone is not harmonization. Ours is calibrated <em>and</em> tested.</li>
+          <li>Agreement between sensors is not ground truth.</li>
+          <li>No ignition probabilities, no street-level precision.</li>
+          <li>No future data in any past prediction.</li>
+          <li>Decision support, never automatic dispatch or official authority.</li>
+          <li>Cite sources, product versions, methods and limits.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>From our data</h3></div>
+        <ol class="steps">
+          <li>Keep only north of 34°N; say why (gas flares).</li>
+          <li>Pre-2012 values are a <strong>lower bound</strong>: fires too small for MODIS are lost.</li>
+          <li>Converted MODIS carries more noise; show the low / high range.</li>
+          <li>Months with too little data are labelled, not interpreted.</li>
+          <li>Weather is “context”, never an official danger index.</li>
+          <li>The AI only rephrases our numbers; the number check enforces it.</li>
+          <li>Mock data is never shown as a result.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 ─────────────────────────────────────────────── -->
+  <section id="rules">
+    <p class="eyebrow">10 · Event rules (Tunis opening ceremony)</p>
+    <h2>Rules that can disqualify us</h2>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Rule</th><th>What it means for us</th></tr>
+      <tr class="hl"><td><strong>Doors 20:00</strong>: leaving after 20:00 disqualifies the team</td><td>Confirm with an organiser. Anyone leaving goes before 20:00; doors reopen at 06:00.</td></tr>
+      <tr class="hl"><td><strong>3 on site, always</strong></td><td>Sleep shifts keep at least 3 of us present.</td></tr>
+      <tr><td><strong>Built in 48 h, no prior work</strong></td><td>Everything is written here; AI-drafted code is declared.</td></tr>
+      <tr><td><strong>NASA data required</strong></td><td>NASA FIRMS MODIS + VIIRS, listed on the page and slides.</td></tr>
+      <tr><td><strong>AI allowed if declared</strong>; watermark AI images and video</td><td>“Use of SI” field: code drafting, passport wording, this plan.</td></tr>
+      <tr><td><strong>No NASA logos or branding</strong></td><td>Nowhere: app, slides, repo, video.</td></tr>
+      <tr><td><strong>Credit everything</strong></td><td>Data, libraries, images, text, Open-Meteo.</td></tr>
+      <tr><td><strong>One public demo link</strong>: ≤ 7 slides (title counts) or ≤ 30 s video, English</td><td>7 slides, tested in a private window.</td></tr>
+      <tr><td><strong>Nobody under 18</strong> in media</td><td>No faces or voices of minors.</td></tr>
+      <tr><td><strong>All members registered for Tunis</strong></td><td>Nobody can be added after submission closes.</td></tr>
+      <tr><td><strong>Local submission Sun 16:30</strong>; edits until 23:59</td><td>We submit at 14:30.</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- 11 ─────────────────────────────────────────────── -->
+  <section id="dodont">
+    <p class="eyebrow">11 · Do / Don't</p>
+    <h2>What we should do, and what we should not</h2>
+    <div class="dodont">
+      <div class="card yes">
+        <div class="card-header"><span class="dot ink"></span><h3>Do</h3></div>
+        <ul>
+          <li><strong>Finish the MUST tier before touching anything else.</strong></li>
+          <li><strong>Lead the demo with Bizerte</strong>: local impact, calibrated on the wider region.</li>
+          <li><strong>Make Sensor Truth Mode flawless</strong>: it is the 10 seconds judges remember.</li>
+          <li><strong>Show the hidden-year proof</strong> in the app and on slide 5.</li>
+          <li><strong>Say our limits first</strong>: 34°N cut, lower bound before 2012, weather ≠ danger index.</li>
+          <li><strong>Keep the template passport</strong> as the fallback for every AI call.</li>
+          <li><strong>Store timestamps and sources</strong> for every number (observation, forecast issue, valid time).</li>
+          <li><strong>Keep JSON backups</strong> so the demo survives a server or Wi-Fi failure.</li>
+          <li><strong>Submit two hours early</strong>; test links in a private window.</li>
+          <li><strong>Sleep in shifts.</strong> A rested presenter beats one more feature.</li>
+        </ul>
+      </div>
+      <div class="card no">
+        <div class="card-header"><span class="dot coral"></span><h3>Don't</h3></div>
+        <ul>
+          <li><strong>Don't build five half-features.</strong> One solid calendar beats five promises.</li>
+          <li><strong>Don't calibrate on Bizerte alone</strong> or on 2022–2024 only.</li>
+          <li><strong>Don't include fires south of 34°N.</strong></li>
+          <li><strong>Don't invent a fire-danger formula</strong> or a probability of ignition.</li>
+          <li><strong>Don't start the Time Machine</strong>, ML models or multi-agent orchestration.</li>
+          <li><strong>Don't let the AI write a number</strong> that isn't in our data.</li>
+          <li><strong>Don't restructure the repo</strong> or change the JSON without P3.</li>
+          <li><strong>Don't put API keys in the website code.</strong></li>
+          <li><strong>Don't use NASA logos</strong>, copyrighted images, or anyone under 18.</li>
+          <li><strong>Don't leave after 20:00</strong>, drop below 3 on site, or exceed 7 slides.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 ─────────────────────────────────────────────── -->
+  <section id="pitch">
+    <p class="eyebrow">12 · Pitch</p>
+    <h2>Seven minutes, one scenario: Bizerte</h2>
+    <p class="callout">“FIRMS tells us what satellites observed. We make 25 years of those observations comparable, prove it on hidden years, and explain every number, so a manager in Bizerte can trust what the history says.”</p>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Time</th><th>What we say or show</th><th>Criterion</th><th>Slide</th></tr>
+      <tr><td class="mono">0:00–0:45</td><td>Two satellites see fires differently; Suomi NPP went dark on 2 Nov 2026 and MODIS ends in 2027.</td><td>Impact</td><td class="mono">2</td></tr>
+      <tr><td class="mono">0:45–1:30</td><td>The user: a forest manager in Bizerte with limited teams who needs a trustworthy history.</td><td>Relevance</td><td class="mono">2</td></tr>
+      <tr><td class="mono">1:30–2:30</td><td>The idea: learn the ratio where both sensors overlap, per area and month, with partial pooling.</td><td>Creativity</td><td class="mono">3</td></tr>
+      <tr class="hl"><td class="mono">2:30–4:30</td><td><strong>Live demo:</strong> Bizerte → calendar → Sensor Truth Mode (3 modes) → unusual month → Evidence Passport → 72 h weather (if built).</td><td>Presentation</td><td class="mono">4</td></tr>
+      <tr class="hl"><td class="mono">4:30–5:45</td><td><strong>Proof:</strong> 72% → 13.7% → 11.5%, plus the gas-flare discovery and our limits.</td><td>Validity</td><td class="mono">5</td></tr>
+      <tr><td class="mono">5:45–6:30</td><td>NASA FIRMS data used and how; where AI is used and how it is checked.</td><td>Validity</td><td class="mono">6</td></tr>
+      <tr><td class="mono">6:30–7:00</td><td>Next: team shortlist, EFFIS FWI, blind historical replay, NOAA-20/21 continuity.</td><td>Impact</td><td class="mono">7</td></tr>
+    </table>
+    </div>
+    <div class="cards two">
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>The 7 slides (title counts)</h3></div>
+        <ol class="steps">
+          <li>Title: name, team, all members, challenge</li>
+          <li>Problem: one record, two sensors, a fake jump in 2012</li>
+          <li>Solution: the calibration in one picture</li>
+          <li>Product: Bizerte calendar, Sensor Truth Mode, passport</li>
+          <li>Proof: the hidden-year chart</li>
+          <li>NASA data and AI use</li>
+          <li>Impact and next steps (shortlist, FWI, replay)</li>
+        </ol>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>Q&amp;A answers to prepare</h3></div>
+        <ul>
+          <li><strong>Why not ML?</strong> A count ratio with pooling is explainable and tested; ML is a next step against this baseline.</li>
+          <li><strong>Why calibrate beyond Bizerte?</strong> Bizerte alone has too few detections for stable monthly ratios.</li>
+          <li><strong>Why north of 34°N?</strong> Gas flares pass NASA's vegetation filter further south.</li>
+          <li><strong>Small fires before 2012?</strong> Can't be recovered: a lower bound, shown in the app.</li>
+          <li><strong>Is this a danger forecast?</strong> No. Weather context next to history; official FWI is EFFIS's job.</li>
+          <li><strong>Why trust the AI?</strong> It only rephrases our numbers, and a check rejects any number it invents.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 ─────────────────────────────────────────────── -->
+  <section id="done">
+    <p class="eyebrow">13 · Definition of done</p>
+    <h2>The final checklist</h2>
+    <div class="cards two">
+      <div class="card">
+        <div class="card-header"><span class="dot coral"></span><h3>Product</h3></div>
+        <ul>
+          <li>Real MODIS + VIIRS data, source-attributed with versions.</li>
+          <li>All views share the same grid and date definitions.</li>
+          <li>Calendar + Sensor Truth Mode work end to end for Bizerte.</li>
+          <li>Hidden-year test documented and shown in the app.</li>
+          <li>Anomalies use a seasonal baseline with uncertainty labels.</li>
+          <li>Passport: every number traceable; missing data reported.</li>
+          <li>Weather (if built) shows source, issue time and valid time.</li>
+          <li>No ignition probabilities, no official-authority claims.</li>
+          <li>App runs from a public link without login; JSON backup ready.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>Submission (project page)</h3></div>
+        <ul>
+          <li><strong>Summary</strong> (50–200 words): what it is, how it answers the challenge, why now.</li>
+          <li><strong>Demo:</strong> ONE public link, the 7 slides.</li>
+          <li><strong>Final project:</strong> live app link + GitHub repo.</li>
+          <li><strong>Details:</strong> how it works, benefits, tools (Python, DuckDB, FastAPI, React, Leaflet, Open-Meteo).</li>
+          <li><strong>Use of SI:</strong> AI-drafted code, passport wording, planning help.</li>
+          <li><strong>NASA data:</strong> FIRMS MODIS + VIIRS 375 m, with links.</li>
+          <li><strong>References:</strong> every dataset, library, image and text source.</li>
+          <li>All 6 members registered for Tunis and on the team page.</li>
+          <li>Everything in English; no NASA logos; nobody under 18.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 ─────────────────────────────────────────────── -->
+  <section id="next">
+    <p class="eyebrow">14 · Next actions</p>
+    <h2>The next three things to do</h2>
+    <div class="cards three">
+      <div class="card focal">
+        <div class="card-header"><span class="dot coral"></span><h3>1 · Whole team, 10 min</h3></div>
+        <p>Agree on this scope (MUST / SHOULD / COULD / CUT) and the project name. Then nobody builds anything outside their tier.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot ink"></span><h3>2 · P1 + P2, next hour</h3></div>
+        <p>Run ingest (with 34 and active days) and calibrate; confirm ≈ 137,000 detections and ≈ 11.5% error.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="dot muted"></span><h3>3 · P5, now</h3></div>
+        <p>Check whether an AI API key is actually available. Build the template passport either way.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer">
+    <span>EmberGuard AI · NASA Space Apps 2026 · Tunis · Harmonization of MODIS and VIIRS Hot Spots</span>
+    <span>Data: NASA FIRMS (MODIS, VIIRS Suomi NPP) · Report prepared with Claude (declare in “Use of SI”)</span>
+  </div>
+</div>
+</body>
+</html>

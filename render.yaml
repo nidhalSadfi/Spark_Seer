@@ -1,15 +1,25 @@
-# Render Blueprint (free web service). Dashboard: New > Blueprint > pick this repo. Steps: backend/README.md (Deploy).
-# Must live at the repo root (Render only reads it there); the API itself is in backend/, hence rootDir.
+# Render Blueprint (free web service). Dashboard: New > Blueprint > pick this repo. Steps in backend/README.md.
 services:
   - type: web
     name: emberledger-api
     runtime: python
     plan: free
     branch: main                 # deploys on every merge to main
-    rootDir: backend             # monorepo: build and start commands run inside backend/
-    buildCommand: pip install -r requirements.txt
+    rootDir: backend             # build/start run in backend/; only changes there trigger deploys
+    # The Meteomatics refresh needs METEOMATICS_USER / METEOMATICS_PASSWORD. Without them it is
+    # skipped and /meteomatics/weather* answers 503; every other endpoint works.
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      (cd meteomatics-weather && python -m pipeline.weather && python -m pipeline.weather_map
+      || echo "Meteomatics refresh skipped: /meteomatics/weather* will answer 503")
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health     # 503 (deploy fails) if data/harmonized.parquet is not committed
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9            # tests run on 3.11
+      - key: METEOMATICS_USER    # sync: false = typed in the Render dashboard, never stored here
+        sync: false
+      - key: METEOMATICS_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY   # optional: AI wording in POST /investigate
+        sync: false

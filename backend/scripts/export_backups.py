@@ -1,7 +1,8 @@
 """Offline backups for the demo, in case the server dies.
 
 Writes web/backup/<area_id>.json (= GET /calendar?area=<id>&start=2001&end=2025) for every area in
-data/areas.json, and web/backup/validation.json (= GET /validation).
+data/areas.json, web/backup/areas.json (= GET /areas) and web/backup/validation.json (= GET /validation).
+The demo page (web/demo/) reads these when the API is unreachable.
 
 Run after the REAL data/harmonized.parquet exists (or set EMBER_DATA):
     python scripts/export_backups.py [out_dir]      # default out_dir: web/backup
@@ -33,6 +34,7 @@ def main(out_dir: Path) -> None:
     # Build everything first, so a missing data file never leaves a half-written backup folder.
     files = {f"{a['id']}.json": core.calendar_for_bbox(tuple(a["bbox"]), START, END)
              for a in core.get_areas()}
+    files["areas.json"] = {"areas": core.get_areas()}
     files["validation.json"] = core.get_validation(include_series=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, obj in files.items():

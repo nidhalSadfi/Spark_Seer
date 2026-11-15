@@ -7,3 +7,11 @@ uvicorn
 httpx           # api/weather.py: Open-Meteo calls (without it the /weather router is skipped)
 anthropic>=2.8  # api/passport.py: optional AI wording; 2.8 is the version verified to accept output_config
 tzdata          # zoneinfo fallback for api/weather.py if the host has no system time zones
+requests>=2.31,<3         # firms_tool: HTTP calls to the FIRMS area API, archive index and portal
+PyYAML>=6.0,<7            # firms_tool/config.py: YAML request files
+beautifulsoup4>=4.12,<5   # firms_tool/portal.py: parses FIRMS download-portal pages
+sqlalchemy>=2.0,<3        # worker/, migrations/: database access (Core) for the processing tables
+psycopg[binary]>=3.1,<4   # SQLAlchemy driver for PostgreSQL (postgresql+psycopg:// URLs)
+alembic>=1.13,<2          # migrations/: schema migrations for the processing tables
+shapely>=2.0,<3           # processing/boundary.py: country clip (vectorised point-in-polygon)
+python-dotenv>=1,<2      # meteomatics-weather/ router (reads its .env); requests is pinned above
