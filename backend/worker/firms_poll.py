@@ -111,7 +111,7 @@ def run(ctx: JobContext) -> str:
             step.summary["note"] = "data_availability returned no rows"
 
     with ctx.step("planning") as step:
-        watermarks = load_watermarks(ctx.engine, [s for s, _ in NRT_SOURCES])
+        watermarks = load_watermarks(ctx.engine, [s for s, _ in NRT_SOURCES], bbox)
         plans = [plan_source(s, sensor, today, availability, watermarks.get(s), settings.firms_max_backfill_days)
                  for s, sensor in NRT_SOURCES]
         estimated = sum(call_cost(w, bbox) for p in plans for w in p.windows)
@@ -211,12 +211,15 @@ def _store_availability(ctx: JobContext, availability: dict[str, tuple[date, dat
              for s, (lo, hi) in sorted(availability.items())])
 
 
-def load_watermarks(engine: Engine, sources: list[str]) -> dict[str, date]:
-    """Last day covered by a stored fetch, per source (a fetch row is committed with its rows)."""
+def load_watermarks(engine: Engine, sources: list[str], bbox: str) -> dict[str, date]:
+    """Last day covered by a stored fetch of this bbox, per source (a fetch row is committed with its
+    rows). Fetches of another bbox do not count: after a FIRMS_BBOX change (e.g. to the world) the new
+    area is backfilled instead of starting from the old area's watermark."""
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT source, max(window_start + (window_days - 1)) AS covered_to FROM firms_fetches "
-            "WHERE source = ANY(CAST(:sources AS text[])) GROUP BY source"), {"sources": sources}).all()
+            "WHERE source = ANY(CAST(:sources AS text[])) AND bbox = :bbox GROUP BY source"),
+            {"sources": sources, "bbox": bbox}).all()
     return {r.source: r.covered_to for r in rows}
 
 

@@ -332,6 +332,19 @@ def test_backfill_starts_from_the_watermark_and_respects_the_cap(pg, settings, f
     assert any("capped" in n for n in notes)
 
 
+def test_a_new_bbox_is_backfilled_not_started_from_the_old_watermark(pg, settings, firms):
+    # Switching FIRMS_BBOX (e.g. to the world, spec §16): the old area's fetches do not count.
+    clock = FakeClock(datetime(2026, 11, 10, 12, tzinfo=timezone.utc))
+    cfg = replace(settings, firms_max_backfill_days=10)
+    make_scheduler(pg.engine, cfg, clock, firms).startup()
+    make_scheduler(pg.engine, cfg, clock, firms).tick()
+    firms.windows.clear()
+    clock.now = datetime(2026, 11, 14, 12, tzinfo=timezone.utc)
+    make_scheduler(pg.engine, replace(cfg, firms_bbox=(-10.0, 30.0, 20.0, 40.0)), clock, firms).tick()
+    assert {w for w in firms.windows if w[0] == "MODIS_NRT"} == {
+        ("MODIS_NRT", date(2026, 11, 5), 5), ("MODIS_NRT", date(2026, 11, 10), 5)}
+
+
 def test_a_failing_source_fails_the_job_but_keeps_the_others(pg, settings, firms):
     firms.fail_sources.add("VIIRS_NOAA21_NRT")
     s = make_scheduler(pg.engine, settings, FakeClock(), firms)
