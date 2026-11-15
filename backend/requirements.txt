@@ -14,3 +14,4 @@ sqlalchemy>=2.0,<3        # worker/, migrations/: database access (Core) for the
 psycopg[binary]>=3.1,<4   # SQLAlchemy driver for PostgreSQL (postgresql+psycopg:// URLs)
 alembic>=1.13,<2          # migrations/: schema migrations for the processing tables
 shapely>=2.0,<3           # processing/boundary.py: country clip (vectorised point-in-polygon)
+python-dotenv>=1,<2      # meteomatics-weather/ router (reads its .env); requests is pinned above

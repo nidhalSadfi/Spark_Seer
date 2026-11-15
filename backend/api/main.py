@@ -4,17 +4,28 @@ Run:  uvicorn api.main:app --reload --port 8000
 Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLat)
       GET /calendar?area=bizerte                     (ids from GET /areas)
 """
+import importlib.util
 import logging
+import os
+import sys
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from api import core
+
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = ROOT / "web"
+METEO_DIR = ROOT / "meteomatics-weather"
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI(title="EmberLedger")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+# Static files: the demo page (web/demo/) and the offline backups (web/backup/).
+app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
 # Teammate routers (api/passport.py, api/weather.py): optional, so the app starts without them.
 try:
@@ -29,6 +40,34 @@ except ImportError as e:
     log.warning("weather router not loaded: %s", e)
 
 
+def load_meteomatics():
+    """The Meteomatics router (meteomatics-weather/, teammate), or None if it cannot load.
+
+    Its modules import `pipeline.grid`, `pipeline.weather`... from their own folder. Neither
+    pipeline/ folder has an __init__.py, so with that folder on sys.path Python merges both into
+    one `pipeline` namespace (no module names overlap).
+    """
+    try:
+        if str(METEO_DIR) not in sys.path:
+            sys.path.append(str(METEO_DIR))
+        spec = importlib.util.spec_from_file_location(
+            "meteomatics_router", METEO_DIR / "api" / "weather_router_example.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (ImportError, OSError) as e:
+        log.warning("meteomatics router not loaded: %s", e)
+        return None
+
+
+# Mounted under /meteomatics: its own GET /weather would clash with api/weather.py's.
+# Its fire layer reads NASA_FIRMS_CSV: default to our real export (scripts/export_fires.py).
+os.environ.setdefault("NASA_FIRMS_CSV", str(ROOT / "data" / "fires.csv"))
+meteomatics = load_meteomatics()
+if meteomatics is not None:
+    app.include_router(meteomatics.router, prefix="/meteomatics", tags=["meteomatics"])
+
+
 @app.exception_handler(FileNotFoundError)
 def missing_data(request, exc):
     # open() sets exc.filename; pyarrow (read_parquet) puts the path in the message instead.
@@ -37,7 +76,7 @@ def missing_data(request, exc):
 
 @app.get("/", include_in_schema=False)
 def root():
-    return RedirectResponse("/docs")  # a browser on the base URL gets the API docs, not a 404
+    return RedirectResponse("/web/demo/")  # a browser on the base URL gets the demo (API docs: /docs)
 
 
 @app.get("/health")
@@ -68,4 +107,7 @@ def calendar(bbox: str | None = None, area: str | None = None, start: int = 2001
         x0, y0, x1, y1 = map(float, bbox.split(","))
     except ValueError:
         raise HTTPException(400, "bbox must be minLon,minLat,maxLon,maxLat")
+    if not (x0 <= x1 and y0 <= y1):  # also catches NaN; such a box would silently select nothing
+        raise HTTPException(400, "bbox needs minLon <= maxLon and minLat <= maxLat; "
+                                 "a box across the antimeridian (180 degrees) must be sent as two boxes")
     return core.calendar_for_bbox((x0, y0, x1, y1), start, end)

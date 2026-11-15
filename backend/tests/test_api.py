@@ -9,7 +9,7 @@ from conftest import VALIDATION, YEARS, make_dataset
 
 REQUIRED = {"year", "month", "modis_raw", "viirs_raw", "harmonized", "support", "z", "flag"}
 FLAGS = {"high", "low", "normal", "low_confidence"}
-BIZERTE = "9.0,36.8,10.3,37.4"
+BIZERTE = "8.3,36.0,9.8,37.2"
 
 
 def test_health(client):
@@ -49,7 +49,7 @@ def test_calendar_by_bbox(client):
 
 def test_areas(client):
     areas = client.get("/areas").json()["areas"]
-    assert [a["id"] for a in areas] == ["bizerte", "nw_tunisia", "kabylie", "ne_algeria"]
+    assert [a["id"] for a in areas] == ["bizerte", "kabylie", "ne_algeria", "petite_kabylie"]
     for a in areas:
         x0, y0, x1, y1 = a["bbox"]
         assert a["name"] and x0 < x1 and y0 < y1
@@ -63,7 +63,8 @@ def test_calendar_by_area_matches_bbox(client):
 
 
 def test_calendar_400s(client):
-    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d"]:
+    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d",
+                  "?bbox=170,-50,-170,-40", "?bbox=0,10,10,0", "?bbox=nan,0,1,1"]:  # across 180, swapped, NaN
         assert client.get("/calendar" + query).status_code == 400, query
 
 
@@ -120,7 +121,19 @@ def test_optional_fields_passed_through_when_present(tmp_path, monkeypatch):
         assert isinstance(r["MODIS_days"], int)
 
 
-def test_root_redirects_to_docs(client):
+def test_root_redirects_to_demo_page(client):
     r = client.get("/", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"] == "/docs"
-    assert client.get("/").status_code == 200  # /docs itself
+    assert r.status_code == 307 and r.headers["location"] == "/web/demo/"
+    page = client.get("/")
+    assert page.status_code == 200 and "EmberLedger demo" in page.text
+    for asset in ["app.js", "style.css"]:
+        assert client.get(f"/web/demo/{asset}").status_code == 200, asset
+    assert client.get("/docs").status_code == 200
+
+
+def test_meteomatics_routes_mounted_under_prefix(client):
+    paths = app.openapi()["paths"]
+    assert {"/meteomatics/weather", "/meteomatics/weather/map", "/meteomatics/weather/grid-meta",
+            "/meteomatics/weather/cell/{grid_id}", "/meteomatics/weather/point",
+            "/meteomatics/fires/calendar"} <= paths.keys()
+    assert client.get("/meteomatics/weather/grid-meta").json()["cell_count"] == 35  # needs no cache

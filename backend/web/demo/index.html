@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EmberLedger demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="wrap top">
+  <div>
+    <h1>EmberLedger demo</h1>
+    <p class="sub">Harmonized MODIS + VIIRS burning-activity calendar. A test page for the API:
+      every number below comes from it.</p>
+  </div>
+  <div class="top-actions">
+    <span id="status" class="status" role="status"><span class="dot" aria-hidden="true"></span><span class="txt">Connecting…</span></span>
+    <a id="docs-link" class="btn ghost" href="/docs" target="_blank" rel="noopener">API docs</a>
+    <button id="theme" class="btn ghost" type="button" title="Theme">Theme: auto</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="banners"></div>
+
+  <details class="card how" open>
+    <summary><h2>How it works</h2></summary>
+    <ol class="steps">
+      <li><b>Ingest.</b> NASA FIRMS hotspot detections: MODIS from 2001, VIIRS (Suomi NPP) from 2012.
+        Vegetation fires only, counted per 0.5° grid cell and month (the committed data: Tunisia and Algeria north of 34°N).</li>
+      <li><b>Calibrate.</b> VIIRS sees more small fires than MODIS. On the years both fly
+        (2012–2021) we fit a ratio <i>k</i> = VIIRS / MODIS per cell and calendar month, pulled toward
+        the regional ratio where a cell has little data. Checked on held-out years (panel below).</li>
+      <li><b>Harmonize.</b> Before 2012: MODIS × <i>k</i> (“VIIRS-equivalent”). From 2012: the observed
+        VIIRS count. One consistent series, 2001–2025.</li>
+      <li><b>Flag.</b> Each month is compared with the same month in other years (robust z-score).
+        ▲ |z| ≥ 3 high, ▼ low, <b>?</b> low confidence: a pre-2012 month whose ratio rests on fewer
+        than 30 MODIS detections.</li>
+    </ol>
+  </details>
+
+  <form id="filters" class="filters" autocomplete="off">
+    <label>Area
+      <select id="area"></select>
+    </label>
+    <label id="bbox-wrap" hidden>Bbox (minLon,minLat,maxLon,maxLat)
+      <input id="bbox" type="text" placeholder="8.3,36.0,9.8,37.2" inputmode="decimal">
+    </label>
+    <label>From <input id="start" type="number" min="2001" max="2025" value="2001"></label>
+    <label>To <input id="end" type="number" min="2001" max="2025" value="2025"></label>
+    <button class="btn" type="submit">Load</button>
+    <span id="filter-msg" class="muted"></span>
+  </form>
+
+  <div id="charts">
+    <section id="kpis" class="kpis" aria-label="Summary"></section>
+
+    <section class="card">
+      <h2>Burning calendar</h2>
+      <p class="muted">Harmonized detections per month (VIIRS terms). Columns are years, rows are months.
+        Hover a cell for details, click it to investigate.</p>
+      <div id="heatmap" class="scroll"></div>
+      <div id="heatmap-legend" class="legend"></div>
+    </section>
+
+    <section class="card">
+      <h2>Why harmonize: yearly totals</h2>
+      <p class="muted">MODIS alone undercounts. Before 2012 the harmonized line is MODIS × <i>k</i>;
+        from 2012 it is the observed VIIRS count (dots), so the two coincide.</p>
+      <div id="annual-legend" class="legend"></div>
+      <div id="annual" class="scroll"></div>
+    </section>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>Typical year</h2>
+        <p class="muted">Median harmonized detections per calendar month. Critical months are in the
+          top quarter of the year.</p>
+        <div id="clim-legend" class="legend"></div>
+        <div id="clim"></div>
+      </section>
+      <section class="card">
+        <h2>How good is the harmonization?</h2>
+        <div id="validation"></div>
+      </section>
+    </div>
+
+    <div class="grid2">
+      <section class="card" id="month-card">
+        <h2>Selected month</h2>
+        <div id="month"><p class="muted">Click a cell in the calendar.</p></div>
+      </section>
+      <section class="card">
+        <h2>Weather context</h2>
+        <div id="weather"><p class="muted">Pick a named area.</p></div>
+      </section>
+    </div>
+
+    <details class="card">
+      <summary><h2>Table views</h2></summary>
+      <div id="tables"></div>
+    </details>
+  </div>
+
+  <details class="card" id="log-card">
+    <summary><h2>API log <span id="log-count" class="muted"></span></h2></summary>
+    <p class="muted">Every request this page made, newest first. Open one to see the raw JSON.</p>
+    <ol id="log" class="log" reversed></ol>
+  </details>
+</main>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

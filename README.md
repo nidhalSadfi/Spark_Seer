@@ -6,7 +6,7 @@ FIRMS data and a React dashboard (NASA Space Apps Challenge 2026, Tunis).
 ## Layout
 
 ```
-backend/              FastAPI API, harmonization pipeline, tests (from origin/backend-core)
+backend/              FastAPI API, harmonization pipeline, tests (from origin/MNS-backend)
 backend/firms_tool/   NASA FIRMS download tool (copied from origin/harmonization-modis-viirs)
 frontend/             React + Vite dashboard (from origin/frontend)
 docker-compose.yml    local services (Postgres for now)
@@ -119,7 +119,7 @@ To pull teammate updates later:
 
 ```bash
 git fetch origin
-git merge -X subtree=backend origin/backend-core
+git merge -X subtree=backend origin/MNS-backend   # backend-core plus Meteomatics, real data, demo page
 git merge -X subtree=frontend origin/frontend
 ```
 

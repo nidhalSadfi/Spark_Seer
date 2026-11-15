@@ -9,6 +9,8 @@ data/raw/
 
 # Fake data from scripts/make_fake_data.py: never commit it.
 data/fake/
+data/cells.parquet
+data/world/
 
 # firms_tool runtime files (from harmonization-modis-viirs/.gitignore): portal session cookie,
 # submission log, and partial downloads.

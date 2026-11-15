@@ -25,7 +25,7 @@ OUT = ROOT / "data" / "fake"
 YEARS = range(2001, 2026)  # MODIS over the whole period, VIIRS S-NPP from 2012
 # Planted anomalies (area, year, month, factor), so the UI has known "high" and "low" months.
 PLANTED = [("bizerte", 2008, 7, 5.0), ("ne_algeria", 2014, 8, 4.0),
-           ("kabylie", 2019, 9, 5.0), ("nw_tunisia", 2016, 8, 0.05)]
+           ("kabylie", 2019, 9, 5.0), ("petite_kabylie", 2016, 8, 0.05)]
 
 
 def cells_of(area: dict) -> set:

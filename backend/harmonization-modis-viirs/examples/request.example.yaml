@@ -1,0 +1,48 @@
+# Example archive-download request plan. Every value marked TODO must come from the user.
+email: you@example.org            # TODO: address FIRMS notifies when files are ready
+format: csv                       # csv | json | shp
+
+area:                             # TODO: region of interest
+  type: bbox                      # world | country | bbox | polygon
+  bbox: [110.0, -45.0, 155.0, -10.0]   # west, south, east, north (Australia, example only)
+  # type: country
+  # country: AUS                  # ISO-3 code, as used by the FIRMS API
+  # archive_country: Australia    # name used by the public yearly archive files
+  # type: polygon
+  # polygon: [[140, -38], [150, -38], [150, -28], [140, -28]]
+
+date_range:                       # TODO: study period
+  start: 2019-01-01
+  end: 2023-12-31
+
+sensors:                          # TODO: pick sensors (see `python -m firms_tool sensors`)
+  - modis_c61
+  - viirs_snpp
+  - viirs_noaa20
+  - viirs_noaa21
+
+# One request per sensor per chunk. FIRMS documents no maximum span, but big
+# areas x long spans produce very large files; yearly chunks keep them manageable.
+chunk: year                       # none | year | month | <N>d
+
+# Field mapping for the create-request POST. The form is only visible after
+# login, so these are placeholders: run `python -m firms_tool inspect-form`,
+# adjust names/values to match, then set verified: true to allow `submit --yes`.
+form:
+  verified: false
+  endpoint: /api/download/
+  method: POST
+  encoding: form                  # form | json
+  fields:
+    email: email
+    sensor: sensor
+    format: format
+    start_date: start_date
+    end_date: end_date
+    area_type: area_type
+    country: country
+    bbox: coordinates
+    polygon: coordinates
+  # sensor_values: {modis_c61: M-C61, viirs_snpp: SV-C2, viirs_noaa20: J1V-C2, viirs_noaa21: J2V-C2}
+  # area_type_values: {world: world, country: country, bbox: rectangle, polygon: polygon}
+  # constants: {email_confirm: "yes"}

@@ -65,9 +65,18 @@ def get_area(area_id: str) -> dict | None:
     return next((a for a in get_areas() if a["id"] == area_id), None)
 
 
-def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int, end: int) -> dict:
-    """Monthly harmonized calendar for a bbox (minLon, minLat, maxLon, maxLat), years start..end."""
+def _year(value) -> int:
+    """2001, "2001" or "2001-01" -> 2001. api/passport.py passes "YYYY-MM" strings."""
+    return int(str(value)[:4])
+
+
+def calendar_for_bbox(bbox: tuple[float, float, float, float], start: int | str, end: int | str) -> dict:
+    """Monthly harmonized calendar for a bbox (minLon, minLat, maxLon, maxLat), years start..end.
+
+    start/end are years; a "YYYY-MM" string counts as its whole year.
+    """
     H = get_data()
+    start, end = _year(start), _year(end)
     x0, y0, x1, y1 = bbox
     sel = H[(H.cx >= int(np.floor(x0 / CELL_DEG))) & (H.cx <= int(np.floor(x1 / CELL_DEG)))
             & (H.cy >= int(np.floor(y0 / CELL_DEG))) & (H.cy <= int(np.floor(y1 / CELL_DEG)))

@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/weather.json
+data/weather_grid.json
+data/weather_map.geojson
+data/.weather-cache/
+data/fires.csv
+web/node_modules/
+web/dist/
+web/test-results/
+data/weather_points.geojson
