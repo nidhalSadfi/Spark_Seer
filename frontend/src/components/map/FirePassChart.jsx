@@ -6,7 +6,7 @@ import { FWI_CLASSES, SAT_COLORS, fmtUtc } from './mapConfig'
 const HOUR = 3600000
 
 const TABS = [
-  { id: 'frp', label: 'Fire Radiative Power', unit: 'MW', fmt: (v) => `${Math.round(v)} MW` },
+  { id: 'frp', label: 'Fire Radiative Power', unit: 'MW', fmt: (v) => (v == null ? 'FRP unknown' : `${Math.round(v)} MW`) },
   { id: 'det', label: 'Detections per pass', unit: 'pixels', fmt: (v) => `${v} detections` },
   { id: 'fwi', label: 'Fire Weather Index', unit: 'FWI', fmt: (v) => `FWI ${Math.round(v)}` },
   { id: 'temp', label: 'Temperature', unit: '°C', fmt: (v) => `${v} °C` },
@@ -63,7 +63,8 @@ function buildOption(tab, fire, range, now) {
     silent: true,
     symbol: 'none',
     lineStyle: { color: '#edf3fb', type: 'solid', width: 1 },
-    label: { formatter: 'Now', color: '#edf3fb', fontSize: 10.5 },
+    // the live feed has no forecast: its right edge is the newest stored detection, not "now"
+    label: { formatter: fire.hourly ? 'Now' : 'Latest', color: '#edf3fb', fontSize: 10.5 },
     data: [{ xAxis: now }],
   }
   const night = {
@@ -178,10 +179,16 @@ function buildOption(tab, fire, range, now) {
   }
 }
 
-/** Bottom chart of the map page: per-pass FRP / detections and hourly fire weather for one fire. */
+/**
+ * Bottom chart of the map page: per-pass FRP / detections and hourly fire weather for one fire.
+ * Live fires have no hourly weather, so only the two pass tabs are offered for them.
+ */
 export default function FirePassChart({ fire, range, now }) {
   const [tabId, setTabId] = useState('frp')
-  const tab = TABS.find((t) => t.id === tabId)
+  const passOnly = Boolean(fire && !fire.hourly)
+  const tabs = passOnly ? TABS.filter((t) => t.id === 'frp' || t.id === 'det') : TABS
+  const activeId = passOnly && tabId !== 'det' ? 'frp' : tabId
+  const tab = TABS.find((t) => t.id === activeId)
   const option = useMemo(() => (fire && range ? buildOption(tab, fire, range, now) : null), [tab, fire, range, now])
 
   let current = null
@@ -195,15 +202,15 @@ export default function FirePassChart({ fire, range, now }) {
   return (
     <div className="flex min-w-0 flex-col">
       <div role="tablist" aria-label="Chart metric" className="flex gap-0.5 overflow-x-auto border-b border-line px-3">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             role="tab"
             type="button"
-            aria-selected={t.id === tabId}
+            aria-selected={t.id === tab.id}
             onClick={() => setTabId(t.id)}
             className={`-mb-px whitespace-nowrap border-b-2 px-3 pb-2.5 pt-3 text-[13px] transition-colors ${
-              t.id === tabId ? 'border-fire font-semibold text-ink' : 'border-transparent text-muted hover:text-ink'
+              t.id === tab.id ? 'border-fire font-semibold text-ink' : 'border-transparent text-muted hover:text-ink'
             }`}
           >
             {t.label}

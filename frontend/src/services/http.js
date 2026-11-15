@@ -2,7 +2,7 @@
  * Minimal fetch wrapper for the EmberLedger API.
  *
  * Base URL: VITE_API_URL (see .env.example), default http://localhost:8000.
- * The API allows any origin for GET/POST, so no dev proxy is needed.
+ * The API allows any origin, so no dev proxy is needed.
  */
 export const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
@@ -21,7 +21,7 @@ export class ApiError extends Error {
 /** True when the backend itself is down/unreachable/missing data, as opposed to a bad request. */
 export const isUnavailable = (e) => e instanceof ApiError && (e.status === 0 || e.status >= 500)
 
-async function request(path, { method = 'GET', params, body } = {}) {
+async function request(path, { method = 'GET', params, body, headers } = {}) {
   const url = new URL(API_BASE + path)
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
@@ -33,7 +33,7 @@ async function request(path, { method = 'GET', params, body } = {}) {
   try {
     res = await fetch(url, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     })
@@ -55,8 +55,11 @@ async function request(path, { method = 'GET', params, body } = {}) {
     }
     throw new ApiError(detail, res.status)
   }
+  if (res.status === 204) return null // No Content (e.g. DELETE)
   return res.json()
 }
 
 export const apiGet = (path, params) => request(path, { params })
-export const apiPost = (path, body) => request(path, { method: 'POST', body })
+export const apiPost = (path, body, headers) => request(path, { method: 'POST', body, headers })
+export const apiPatch = (path, body, headers) => request(path, { method: 'PATCH', body, headers })
+export const apiDelete = (path, headers) => request(path, { method: 'DELETE', headers })

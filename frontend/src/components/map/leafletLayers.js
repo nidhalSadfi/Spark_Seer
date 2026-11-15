@@ -133,8 +133,9 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};
 
 /** Flame marker sized by Fire Radiative Power, with a pulsing ring when selected. */
 export function fireIcon(fire, selected) {
-  const s = Math.min(30, Math.max(14, 14 + fire.frp / 6))
-  const h = Math.min(120, Math.max(34, 30 + fire.frp * 1.1))
+  const frp = fire.frp ?? 0 // unknown FRP: smallest marker
+  const s = Math.min(30, Math.max(14, 14 + frp / 6))
+  const h = Math.min(120, Math.max(34, 30 + frp * 1.1))
   return L.divIcon({
     className: '',
     iconSize: [26, 26],
@@ -151,7 +152,9 @@ export function fireLabelIcon(fire) {
     className: '',
     iconSize: [0, 0],
     iconAnchor: [0, 0],
-    html: `<div class="sg-label"><b>${esc(fire.name)}</b>${Math.round(fire.frp)} MW · FWI ${fire.fwi} · ${fire.persistence} passes</div>`,
+    html: `<div class="sg-label"><b>${esc(fire.name)}</b>${fire.frp == null ? 'FRP unknown' : `${Math.round(fire.frp)} MW`}${
+      fire.fwi == null ? '' : ` · FWI ${fire.fwi}`
+    } · ${fire.persistence} passes</div>`,
   })
 }
 

@@ -13,6 +13,7 @@ import {
   getWeather,
   investigate,
 } from '../services/emberApi'
+import { FIRMS_BBOX } from '../services/constants'
 import { anomalyPct, historicalMedian, latestObservation } from '../utils/stats'
 
 const opts = { staleTime: 5 * 60 * 1000, placeholderData: (prev) => prev }
@@ -133,12 +134,20 @@ export function useDataMode() {
   return { mode, rows: health.data?.rows ?? null, validation: validation.data ?? null }
 }
 
-/** Near-real-time active fires for the map. Mock feed: the backend has no endpoint for this yet. */
+/**
+ * Near-real-time active fires for the map (GET /fires/live, clustered in the browser), for the
+ * drawn area, else the selected named area, else the whole FIRMS region. Falls back to the
+ * illustrative mock feed only when the API is unreachable: check `data.meta.source`.
+ */
 export function useActiveFires() {
-  const { region, sensor } = useFilters()
+  const { target, areas, sensor } = useFilters()
+  const bbox = target.bbox ?? areas.find((a) => a.id === target.area)?.bbox ?? FIRMS_BBOX
   return useQuery({
-    queryKey: ['active-fires', region, sensor],
-    queryFn: () => getActiveFires({ region, sensor }),
+    queryKey: ['active-fires', bbox.join(','), sensor],
+    queryFn: () => getActiveFires({ region: target.area ?? null, bbox, sensor, areas }),
     ...opts,
+    // the backend polls FIRMS every few hours; a 10-minute refresh picks new passes up soon enough
+    refetchInterval: 10 * 60 * 1000,
+    retry: (n, e) => n < 1 && !(e?.status >= 400 && e?.status < 500),
   })
 }

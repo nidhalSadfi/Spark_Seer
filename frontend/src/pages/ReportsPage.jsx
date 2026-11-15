@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
-import { ArrowUpRight, Check, CircleX, Flame, Inbox, MapPinPlus, RotateCcw, SatelliteDish, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, Check, CircleX, Flame, HardDrive, Inbox, MapPinPlus, RotateCcw, SatelliteDish, Trash2, X } from 'lucide-react'
 import { Badge, Notice, PageHeader, Skeleton } from '../components/ui/primitives'
 import ReportIntel from '../components/reports/ReportIntel'
 import ReportMiniMap from '../components/reports/ReportMiniMap'
 import { useActiveFires } from '../hooks/useFireData'
 import { useReports } from '../hooks/useReports'
+import { notifyReportError } from '../components/reports/notifyError'
+import { API_BASE } from '../services/http'
 import { STATUS, fmtLatLon, fmtLocal, observedLabel, satelliteCheck, timeAgo } from '../utils/reports'
 
 const TABS = [
@@ -71,8 +73,15 @@ function ReportRow({ report, active, onSelect }) {
 }
 
 /** Hotspots the satellite feed shows around the reported point: the evidence a reviewer weighs. */
-function SatelliteCheck({ report, feed }) {
+function SatelliteCheck({ report, feed, feedError }) {
   const check = satelliteCheck(report, feed)
+  if (!check && feedError) {
+    return (
+      <p className="rounded-xl border border-line bg-sidebar/60 px-3.5 py-3 text-xs text-muted">
+        The satellite feed could not be loaded: {feedError.message}
+      </p>
+    )
+  }
   if (!check) return <Skeleton className="h-16" />
   const n = check.detections.length
   return (
@@ -97,7 +106,13 @@ function SatelliteCheck({ report, feed }) {
             Nearest mapped fire: {check.nearest.name}, {check.nearest.km < 10 ? check.nearest.km.toFixed(1) : Math.round(check.nearest.km)} km away.
           </p>
         )}
-        <p className="mt-1 text-[11px] text-faint">The near-real-time feed is illustrative sample data in this version.</p>
+        {feed.meta?.source === 'mock' ? (
+          <p className="mt-1 text-[11px] text-yellow-200/90">
+            The live fire feed is unreachable, so this compares against illustrative sample fires, not real detections.
+          </p>
+        ) : (
+          <p className="mt-1 text-[11px] text-faint">NASA FIRMS near-real-time detections for the area selected in the filters.</p>
+        )}
       </div>
     </div>
   )
@@ -125,7 +140,7 @@ function DeleteButton({ onDelete }) {
   )
 }
 
-function ReportReview({ report, feed, onVerdict, onReopen, onDelete }) {
+function ReportReview({ report, feed, feedError, busy, onVerdict, onReopen, onDelete }) {
   const st = STATUS[report.status]
   const reviewed = report.status !== 'pending'
 
@@ -156,14 +171,16 @@ function ReportReview({ report, feed, onVerdict, onReopen, onDelete }) {
             <button
               type="button"
               onClick={() => onVerdict(report, true)}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-fire px-4 text-sm font-semibold text-[#1a0d02] transition-colors hover:bg-orange-400"
+              disabled={busy}
+              className="disabled:opacity-60 inline-flex h-10 items-center gap-2 rounded-lg bg-fire px-4 text-sm font-semibold text-[#1a0d02] transition-colors hover:bg-orange-400"
             >
               <Check className="size-4" aria-hidden /> Yes, it is a fire
             </button>
             <button
               type="button"
               onClick={() => onVerdict(report, false)}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-line px-4 text-sm font-medium text-ink transition-colors hover:border-faint hover:bg-card-hi"
+              disabled={busy}
+              className="disabled:opacity-60 inline-flex h-10 items-center gap-2 rounded-lg border border-line px-4 text-sm font-medium text-ink transition-colors hover:border-faint hover:bg-card-hi"
             >
               <X className="size-4" aria-hidden /> No, false alarm
             </button>
@@ -191,7 +208,7 @@ function ReportReview({ report, feed, onVerdict, onReopen, onDelete }) {
                 View on the map <ArrowUpRight className="size-3.5" aria-hidden />
               </Link>
             )}
-            <button type="button" onClick={() => onReopen(report)} className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink">
+            <button type="button" onClick={() => onReopen(report)} disabled={busy} className="disabled:opacity-60 inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink">
               <RotateCcw className="size-3.5" aria-hidden /> Reopen as unverified
             </button>
             <DeleteButton onDelete={() => onDelete(report)} />
@@ -205,7 +222,7 @@ function ReportReview({ report, feed, onVerdict, onReopen, onDelete }) {
         <ReportMiniMap key={report.id} report={report} feed={feed} height={260} />
         <div className="flex min-w-0 flex-col gap-3">
           {report.note && <p className="rounded-lg bg-sidebar/70 px-3 py-2 text-[13px] leading-relaxed text-muted">“{report.note}”</p>}
-          <SatelliteCheck report={report} feed={feed} />
+          <SatelliteCheck report={report} feed={feed} feedError={feedError} />
         </div>
       </div>
 
@@ -233,35 +250,56 @@ function ReportReview({ report, feed, onVerdict, onReopen, onDelete }) {
  * coordinates get a weather lookup) or dismisses it as a false alarm.
  */
 export default function ReportsPage() {
-  const { reports, counts, reviewReport, reopenReport, deleteReport } = useReports()
-  const { data: feed } = useActiveFires()
+  const { reports, counts, source, fallbackReason, isLoading, error, reviewReport, reopenReport, deleteReport } = useReports()
+  const { data: feed, error: feedError } = useActiveFires()
   const [params] = useSearchParams()
+  const [busy, setBusy] = useState(false)
 
-  // opened with ?report=<id> (from the map): start on that report, in the tab it belongs to
-  const linked = reports.find((r) => r.id === params.get('report'))
-  const [tab, setTab] = useState(linked?.status ?? 'pending')
-  const [selectedId, setSelectedId] = useState(linked?.id ?? null)
+  // opened with ?report=<id> (from the map): start on that report, in the tab it belongs to.
+  // The list loads asynchronously, so the tab follows the linked report until one is picked.
+  const linkedId = params.get('report')
+  const linked = reports.find((r) => r.id === linkedId)
+  const [pickedTab, setTab] = useState(null)
+  const tab = pickedTab ?? linked?.status ?? 'pending'
+  const [selectedId, setSelectedId] = useState(linkedId)
 
   const list = tab === 'all' ? reports : reports.filter((r) => r.status === tab)
   const selected = list.find((r) => r.id === selectedId) ?? list[0] ?? null
   const countOf = (id) => (id === 'all' ? counts.total : counts[id])
 
-  const decide = (report, isFire) => {
-    reviewReport(report.id, isFire)
+  const run = async (fn) => {
+    setBusy(true)
+    try {
+      return await fn()
+    } catch (e) {
+      notifyReportError(e)
+      return undefined
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const decide = async (report, isFire) => {
+    const done = await run(() => reviewReport(report.id, isFire))
+    if (!done) return
     setSelectedId(report.id)
     if (tab !== 'all') setTab(isFire ? 'confirmed' : 'false')
     toast(isFire ? 'Confirmed: it now shows as a fire on the map. Fetching its weather…' : 'Dismissed as a false alarm.', {
-      action: { label: 'Undo', onClick: () => reopenReport(report.id) },
+      action: { label: 'Undo', onClick: () => reopenReport(report.id).catch(notifyReportError) },
     })
   }
-  const reopen = (report) => {
-    reopenReport(report.id)
+  const reopen = async (report) => {
+    const done = await run(() => reopenReport(report.id))
+    if (!done) return
     setSelectedId(report.id)
     if (tab !== 'all') setTab('pending')
   }
-  const remove = (report) => {
-    deleteReport(report.id)
-    toast('Report deleted.')
+  const remove = async (report) => {
+    const done = await run(async () => {
+      await deleteReport(report.id)
+      return true
+    })
+    if (done) toast('Report deleted.')
   }
 
   return (
@@ -281,12 +319,33 @@ export default function ReportsPage() {
       />
 
       <div className="mb-4">
-        <Notice icon={Inbox} tone="info" title="Stored in this browser.">
-          Reports and reviews are kept on this device only for now: other people and other devices do not see them.
-        </Notice>
+        {source === 'local' ? (
+          <Notice icon={HardDrive} title="Saved in this browser only.">
+            The reports server at {API_BASE} is unreachable{fallbackReason ? ` (${fallbackReason.replace(/\.$/, '')})` : ''}, so reports and reviews
+            are kept on this device only: other people and other devices do not see them, and they are not sent to the server when it comes
+            back. This page keeps checking for the server.
+          </Notice>
+        ) : source === 'api' ? (
+          <Notice icon={Inbox} tone="info" title="Shared reports.">
+            Reports are stored on the EmberLedger server, so everyone using it sees them and their reviews. The list refreshes every 30 seconds.
+          </Notice>
+        ) : null}
       </div>
 
-      {counts.total === 0 ? (
+      {error && (
+        <div className="mb-4">
+          <Notice icon={AlertTriangle} title="Could not load the reports.">
+            {error.message}
+          </Notice>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]" role="status" aria-label="Loading reports">
+          <Skeleton className="h-72" />
+          <Skeleton className="h-96" />
+        </div>
+      ) : counts.total === 0 ? (
         <div className={`${panel} flex flex-col items-center gap-3 px-6 py-16 text-center`}>
           <StatusIcon status="pending" className="size-12! text-2xl!" />
           <h2 className="text-base font-semibold text-ink">No reports yet</h2>
@@ -341,7 +400,15 @@ export default function ReportsPage() {
           </div>
 
           {selected ? (
-            <ReportReview report={selected} feed={feed} onVerdict={decide} onReopen={reopen} onDelete={remove} />
+            <ReportReview
+              report={selected}
+              feed={feed}
+              feedError={feedError}
+              busy={busy}
+              onVerdict={decide}
+              onReopen={reopen}
+              onDelete={remove}
+            />
           ) : (
             <div className={`${panel} grid place-items-center px-6 py-20 text-center text-sm text-muted`}>Select a report to review it.</div>
           )}

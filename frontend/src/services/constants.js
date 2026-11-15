@@ -29,3 +29,9 @@ export const FLAGS = {
 export const DATA_START_YEAR = 2001
 export const DATA_END_YEAR = 2025
 export const VIIRS_START_YEAR = 2012
+
+/** The whole FIRMS polling region [minLon, minLat, maxLon, maxLat] (Tunisia + northern Algeria). */
+export const FIRMS_BBOX = [-2.5, 34, 11.5, 38]
+
+/** Hours of near-real-time detections the fire map shows (its time slider and "24 h" counts). */
+export const LIVE_WINDOW_H = 24
