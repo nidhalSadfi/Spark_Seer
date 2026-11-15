@@ -20,6 +20,7 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+import pgcopy
 from processing.calibration import Calibration
 from processing.common import REF_MODIS, jsonable
 
@@ -167,12 +168,13 @@ class Promotion:
 
 
 def promote(engine: Engine, *, job_id: int, worker_id: str, calibration_version_id: int,
-            processed: Sequence[tuple[int, str]], summary: Mapping, now: datetime) -> Promotion:
+            processed: Sequence[tuple[int, str]] | pd.DataFrame, summary: Mapping, now: datetime) -> Promotion:
     """Publish job `job_id`'s staging rows in ONE transaction (spec §8); any exception rolls back all.
 
-    `processed`: (raw_detections.id, content_hash) of the pending rows the run was computed from;
-    those still carrying that hash get needs_processing = false. A row modified again since keeps
-    its flag and is processed by the next run.
+    `processed`: (raw_detections.id, content_hash) of the pending rows the run was computed from
+    (pairs, or a frame with columns id and content_hash); those still carrying that hash get
+    needs_processing = false. A row modified again since keeps its flag and is processed by the
+    next run.
     """
     with engine.begin() as c:
         return _promote(c, job_id=job_id, worker_id=worker_id, calibration_version_id=calibration_version_id,
@@ -235,14 +237,21 @@ def _mark_succeeded(c: Connection, job_id: int, version: int, now: datetime) -> 
                    "heartbeat_at = :now WHERE id = :id"), {"id": job_id, "version": version, "now": now})
 
 
-def _clear_pending(c: Connection, processed: Sequence[tuple[int, str]]) -> int:
-    if not processed:
+def _clear_pending(c: Connection, processed: Sequence[tuple[int, str]] | pd.DataFrame) -> int:
+    """needs_processing = false for the (id, content_hash) pairs still unchanged. The pairs go in
+    with COPY (a world run clears millions, spec §16), into a temp table dropped at commit."""
+    frame = processed[["id", "content_hash"]] if isinstance(processed, pd.DataFrame) else \
+        pd.DataFrame(list(processed), columns=["id", "content_hash"])
+    if frame.empty:
         return 0
+    c.execute(text("CREATE TEMP TABLE processed_detections (id bigint NOT NULL, content_hash text NOT NULL) "
+                   "ON COMMIT DROP"))
+    pgcopy.write_table(c, "processed_detections", frame.astype({"id": "int64"}))
+    c.execute(text("ANALYZE processed_detections"))
     return c.execute(text("""
         UPDATE raw_detections AS r SET needs_processing = false
-        FROM unnest(CAST(:ids AS bigint[]), CAST(:hashes AS text[])) AS p(id, content_hash)
-        WHERE r.id = p.id AND r.content_hash = p.content_hash AND r.needs_processing"""),
-        {"ids": [int(i) for i, _ in processed], "hashes": [h for _, h in processed]}).rowcount
+        FROM processed_detections AS p
+        WHERE r.id = p.id AND r.content_hash = p.content_hash AND r.needs_processing""")).rowcount
 
 
 # ----------------------------------------------------------------------------- job records
