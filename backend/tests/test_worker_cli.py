@@ -38,7 +38,9 @@ def test_invalid_setting_is_a_clear_error():
 
 
 def test_api_does_not_import_the_worker():
-    # Invariant I1: the API process never imports worker, crewai or the database layer.
+    # Invariant I1: the API process never imports worker or crewai. SQLAlchemy is imported lazily, only
+    # once DATABASE_URL is set (api/database.py), so importing the app loads no database layer either.
+    # test_api_database.py checks I1 again after serving every endpoint.
     code = ("import sys, api.main; bad = sorted(m for m in sys.modules "
             "if m.split('.')[0] in ('worker', 'crewai', 'sqlalchemy', 'psycopg')); assert not bad, bad")
     r = subprocess.run([sys.executable, "-c", code], cwd=BACKEND, capture_output=True, text=True, timeout=60)

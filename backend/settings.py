@@ -1,6 +1,7 @@
-"""Typed settings for new backend code (worker, migrations, processing), read from environment variables.
+"""Typed settings for new backend code (worker, migrations, processing, API), read from environment variables.
 
-All new code reads configuration through `Settings.from_env()` (spec §12). Variable names match
+All new code reads configuration through `Settings.from_env()` (worker, migrations) or
+`ApiSettings.from_env()` (the API process) (spec §12). Variable names match
 the root `.env.example`. Empty values count as unset, so `VAR=` lines in a .env file fall back to
 the default. This module never loads a .env file itself.
 """
@@ -141,6 +142,36 @@ class Settings:
             kw["review_summary_max_chars"] = _number("REVIEW_SUMMARY_MAX_CHARS", v, int)
         if (v := _get("STAGING_RETENTION_DAYS")) is not None:
             kw["staging_retention_days"] = _number("STAGING_RETENTION_DAYS", v, int)
+        return cls(**kw)
+
+
+@dataclass(frozen=True)
+class ApiSettings:
+    """What the API process reads (spec §10, §12). Separate from `Settings` so that a worker-only
+    value (an OpenRouter model list without a key, say) can never stop the API from starting."""
+
+    database_url: str | None = field(default=None, repr=False)
+    # Seconds between checks of the approved dataset version behind /calendar (spec §10).
+    api_version_check_s: float = 30.0
+    # Connect timeout of the API's database connections; short, so an unreachable database
+    # turns into a quick 503 (or the parquet fallback) instead of a hanging request.
+    api_db_connect_timeout_s: int = 3
+    # When set, PATCH and DELETE /reports need it in the X-Admin-Token header (spec §10).
+    reports_admin_token: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        _check(self.api_version_check_s >= 0 and math.isfinite(self.api_version_check_s), "API_VERSION_CHECK_S",
+               "must be a number >= 0", self.api_version_check_s)
+        _check(1 <= self.api_db_connect_timeout_s <= 60, "API_DB_CONNECT_TIMEOUT_S", "must be an integer from 1 to 60",
+               self.api_db_connect_timeout_s)
+
+    @classmethod
+    def from_env(cls) -> "ApiSettings":
+        kw: dict = {"database_url": _get("DATABASE_URL"), "reports_admin_token": _get("REPORTS_ADMIN_TOKEN")}
+        if (v := _get("API_VERSION_CHECK_S")) is not None:
+            kw["api_version_check_s"] = _number("API_VERSION_CHECK_S", v, float)
+        if (v := _get("API_DB_CONNECT_TIMEOUT_S")) is not None:
+            kw["api_db_connect_timeout_s"] = _number("API_DB_CONNECT_TIMEOUT_S", v, int)
         return cls(**kw)
 
 
