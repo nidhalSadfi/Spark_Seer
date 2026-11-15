@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 node_modules/
 frontend/dist/
+
+# Local data copies (FIRMS archives, world dataset): never commit.
+/data/
