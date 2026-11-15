@@ -12,14 +12,15 @@ import { DATA_RANGE } from '../services/fireApi'
 import { sensorLabel } from '../services/constants'
 
 export default function AnalyticsPage() {
-  const { target, sensor, startYear, endYear } = useFilters()
+  const { target, sensor, startYear, endYear, dataEndYear } = useFilters()
   const { data: matrix } = useMonthlyMatrix()
   const { data: comparison } = useSensorComparison()
   const { data: summaries } = useRegionSummaries()
-  const [focusYear, setFocusYear] = useState(DATA_RANGE.endYear)
+  const [pickedFocusYear, setFocusYear] = useState(null) // null: the last year with data
+  const focusYear = pickedFocusYear ?? dataEndYear
 
   const yearOptions = []
-  for (let y = DATA_RANGE.endYear; y > DATA_RANGE.startYear; y--) yearOptions.push({ value: y, label: String(y) })
+  for (let y = dataEndYear; y > DATA_RANGE.startYear; y--) yearOptions.push({ value: y, label: String(y) })
 
   return (
     <>
@@ -38,7 +39,9 @@ export default function AnalyticsPage() {
           <CardHeader
             kicker="Long-term"
             title="Yearly totals by sensor"
-            subtitle="Raw MODIS and VIIRS counts are shown separately from the harmonized estimate; they are not directly comparable."
+            subtitle={`Raw MODIS and VIIRS counts are shown separately from the harmonized estimate; they are not directly comparable.${
+              comparison?.incompleteYears?.length ? ` No total for ${comparison.incompleteYears.join(', ')}: months still missing or partial.` : ''
+            }`}
           />
           <HistoricalComparison comparison={comparison} startYear={startYear} endYear={endYear} />
         </Card>

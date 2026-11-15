@@ -3,7 +3,7 @@ import { motion } from 'motion/react'
 import { MousePointerClick } from 'lucide-react'
 import EChart, { axisStyle, tooltipStyle } from '../common/EChart'
 import { Badge } from '../ui/primitives'
-import { MONTHS, anomalyPct, historicalMedian } from '../../utils/stats'
+import { MONTHS, anomalyPct, cellCoverage, historicalMedian } from '../../utils/stats'
 import { anomalyTone, fmtInt, fmtPct } from '../../utils/format'
 import { FLAGS, sensorLabel } from '../../services/constants'
 import PassportSection from './PassportSection'
@@ -36,6 +36,7 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
       // API-computed values (harmonized series only)
       flag: sensor === 'harmonized' ? matrix.flags[yi][selected.month] : null,
       z: sensor === 'harmonized' ? matrix.z[yi][selected.month] : null,
+      partial: cellCoverage(matrix, yi, selected.month) === 'partial',
     }
   }, [matrix, selected, sensor])
 
@@ -88,10 +89,21 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
           {MONTHS[selected.month]} {selected.year}
         </h4>
         <div className="flex items-center gap-1.5">
+          {detail.partial && (
+            <Badge tone="warn" title="Near-real-time month that is not complete yet">
+              Partial
+            </Badge>
+          )}
           {detail.flag && FLAGS[detail.flag] && <Badge tone={FLAGS[detail.flag].tone}>{FLAGS[detail.flag].short}</Badge>}
           <Badge tone={sensor === 'harmonized' ? 'info' : 'neutral'}>{sensorLabel(sensor)}</Badge>
         </div>
       </div>
+      {detail.partial && (
+        <p className="rounded-xl border border-dashed border-yellow-300/50 bg-yellow-300/5 px-3 py-2 text-xs text-yellow-100">
+          Partial month: near-real-time data that is still arriving, so the count is incomplete and the anomaly is not
+          final.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Hotspots" value={fmtInt(detail.count)} />
         <Stat label="Hist. median" value={fmtInt(detail.baseline)} />
@@ -115,7 +127,8 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
         {sensor === 'harmonized'
           ? 'Harmonized = VIIRS-equivalent detections: MODIS × a fitted ratio before 2012, observed VIIRS from 2012. Not directly comparable with raw counts. Flag and z-score come from the API (robust z vs. the same month in other years, |z| ≥ 3).'
           : `Raw ${sensorLabel(sensor)} detections. Not directly comparable with other sensors.`}{' '}
-        Baseline: median of this calendar month in all earlier years of the record.
+        Baseline: median of this calendar month in all earlier complete years of the record (months without data or
+        partial months are left out).
       </p>
       <PassportSection year={selected.year} month={selected.month + 1} />
     </motion.div>

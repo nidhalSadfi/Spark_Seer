@@ -11,6 +11,7 @@ const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const CalendarPage = lazy(() => import('./pages/CalendarPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const DataExplorer = lazy(() => import('./pages/DataExplorer'))
+const ProcessingPage = lazy(() => import('./pages/ProcessingPage'))
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="explorer" element={<DataExplorer />} />
+          <Route path="processing" element={<ProcessingPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

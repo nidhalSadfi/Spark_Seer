@@ -22,7 +22,7 @@ from sqlalchemy.engine import make_url  # noqa: E402
 
 from api import core, database  # noqa: E402
 from api.main import app  # noqa: E402
-from conftest import make_dataset  # noqa: E402
+from conftest import YEARS, make_dataset  # noqa: E402
 from llm_stub import Script, crewai_storage  # noqa: E402,F401 - fixture
 from processing.inter_viirs import FIT_KIND  # noqa: E402
 from test_worker_pg import BACKEND, T0, FakeClock, boot, firms, pg, pg_url, settings  # noqa: E402,F401
@@ -82,6 +82,39 @@ def calendars(client) -> dict:
     return {q: client.get(f"/calendar?{q}").json() for q in CALENDAR_QUERIES}
 
 
+COUNT_FIELDS = ("year", "month", "modis_raw", "viirs_raw", "harmonized", "support", "MODIS_days", "VIIRS_days")
+
+
+def assert_database_matches_parquet(from_db: dict, from_parquet: dict) -> None:
+    """The database calendar against the parquet one for CALENDAR_QUERIES (spec §10, I7).
+
+    The synthetic dataset only has the years YEARS. The parquet calls every month "full" (as before
+    `coverage` existed); the database calls the months outside YEARS "none", keeps their zero-filled
+    counts, and leaves them out of the anomaly baseline. So a query inside YEARS is identical, and
+    any query has the same counts, with z, flag and critical_months as the parquet over YEARS only.
+    """
+    for q in CALENDAR_QUERIES:
+        db, pq = from_db[q], from_parquet[q]
+        if not pq["months"]:
+            assert db == pq, q
+            continue
+        assert {m["coverage"] for m in pq["months"]} == {"full"}, q
+        assert [m["coverage"] for m in db["months"]] == \
+            ["full" if m["year"] in YEARS else "none" for m in db["months"]], q
+        counts = lambda body: [{k: m[k] for k in COUNT_FIELDS if k in m} for m in body["months"]]  # noqa: E731
+        assert counts(db) == counts(pq), q
+        years = {m["year"] for m in pq["months"]}
+        if years <= set(YEARS):
+            assert db == pq, q
+    for area in AREAS:  # outside YEARS nothing enters the baseline: the anomaly scores of the covered years
+        db, pq = from_db[f"area={area}"], from_parquet[f"area={area}&start=2008&end=2015"]
+        if not pq["months"]:
+            continue
+        covered = [m for m in db["months"] if m["coverage"] == "full"]
+        assert covered == pq["months"], area
+        assert db["meta"] == pq["meta"], area
+
+
 # -- /calendar from cell_month ---------------------------------------------------------------------
 
 def test_calendar_from_the_bootstrapped_database_equals_the_parquet(api, pg, tmp_path, monkeypatch):
@@ -98,7 +131,7 @@ def test_calendar_from_the_bootstrapped_database_equals_the_parquet(api, pg, tmp
     monkeypatch.delenv("DATABASE_URL")
     assert api.get("/health").json()["data_source"] == "parquet"
     from_parquet = calendars(api)
-    assert from_db == from_parquet
+    assert_database_matches_parquet(from_db, from_parquet)
     # Spec §15: VIIRS is NULL before 2012 in the database, and viirs_raw stays 0 there.
     months = from_db[f"bbox={REGION}&start=2011&end=2012"]["months"]
     assert all(m["viirs_raw"] == 0 for m in months if m["year"] == 2011)
@@ -114,10 +147,9 @@ def test_calendar_day_columns_come_from_the_database_too(api, pg, tmp_path, monk
     monkeypatch.delenv("DATABASE_URL")
     from_parquet = calendars(api)
     for q in CALENDAR_QUERIES:
-        expected = from_parquet[q]
-        for m in expected["months"]:
+        for m in from_parquet[q]["months"]:
             m.pop("low", None), m.pop("high", None)
-        assert from_db[q] == expected, q
+    assert_database_matches_parquet(from_db, from_parquet)
     assert "VIIRS_days" in from_db["area=bizerte"]["months"][0]
 
 
@@ -149,6 +181,67 @@ def test_calendar_follows_a_new_approved_version_after_the_check_interval(api, p
     now[0] += 31
     api.get(query)
     assert len(loads) == 2  # re-checked, same version: the cached frame is reused
+
+
+def add_cell_months(engine, rows) -> None:
+    """Approved cell_month rows of dataset version 1, by hand (cy, cx, year, month, harmonized, is_partial)."""
+    with engine.begin() as c:
+        for cy, cx, year, month, harmonized, partial in rows:
+            c.execute(text("""
+                INSERT INTO cell_month (cy, cx, year, month, modis, viirs_ref, harmonized, k, support, reference,
+                                        is_partial, calibration_version_id, dataset_version_id)
+                VALUES (:cy, :cx, :y, :m, 0, :h, :h, 3.0, 200, 'NOAA20', :p, 1, 1)"""),
+                {"cy": cy, "cx": cx, "y": year, "m": month, "h": harmonized, "p": partial})
+
+
+def test_calendar_coverage_marks_partial_and_missing_months(api, pg, tmp_path, monkeypatch):
+    """I7: a year-month the approved dataset has no row for, or after the current UTC month, is "none"
+    (its zero-filled counts kept, but outside the baseline); one with a partial row is "partial"."""
+    parquet = boot_parquet(pg.engine, tmp_path / "boot")
+    monkeypatch.setenv("EMBER_DATA", parquet)
+    # 2016: March complete in one bizerte cell, May partial in a kabylie cell only (the dataset as a
+    # whole decides, so bizerte's May is "partial" too); every other 2016 month has no row at all.
+    add_cell_months(pg.engine, [(73, 18, 2016, 3, 40.0, False), (72, 8, 2016, 5, 12.0, True),
+                                (72, 8, 2016, 6, 7.0, False), (73, 18, 2016, 6, 3.0, True)])
+    monkeypatch.setattr(core, "_utcnow", lambda: datetime(2016, 6, 20, tzinfo=timezone.utc))
+    health = api.get("/health").json()
+    assert (health["data_source"], health["data_end_year"]) == ("database", 2025)  # never before 2025
+
+    body = api.get("/calendar?area=bizerte&start=2015&end=2016").json()
+    months = {(m["year"], m["month"]): m for m in body["months"]}
+    assert {months[(2015, mo)]["coverage"] for mo in range(1, 13)} == {"full"}
+    assert {mo: months[(2016, mo)]["coverage"] for mo in range(1, 13)} == {
+        1: "none", 2: "none", 3: "full", 4: "none", 5: "partial", 6: "partial",
+        7: "none", 8: "none", 9: "none", 10: "none", 11: "none", 12: "none"}  # 7-12: after June 2016
+    assert months[(2016, 3)]["harmonized"] == 40.0 and months[(2016, 6)]["harmonized"] == 3.0
+    none = months[(2016, 1)]
+    assert (none["modis_raw"], none["viirs_raw"], none["harmonized"]) == (0, 0, 0)  # zero-filled, as before
+    assert none["support"] == months[(2015, 1)]["support"]
+
+    # The baseline (z, flag, critical_months) leaves "none" and "partial" months out: with 2016 in the
+    # request, 2008-2015 score exactly as without it, except March, whose baseline gained a full 2016.
+    score = lambda q: {(m["year"], m["month"]): (m["z"], m["flag"])  # noqa: E731
+                       for m in api.get(f"/calendar?area=bizerte&{q}").json()["months"]}
+    with_2016, alone = score("start=2008&end=2016"), score("start=2008&end=2015")
+    assert {k: v for k, v in alone.items() if k[1] != 3} == \
+        {k: v for k, v in with_2016.items() if k[0] <= 2015 and k[1] != 3}
+    assert [v for k, v in with_2016.items() if k[1] == 3 and k[0] <= 2015] != [v for k, v in alone.items() if k[1] == 3]
+    assert api.get("/calendar?area=bizerte&start=2008&end=2016").json()["meta"]["critical_months"] == \
+        api.get("/calendar?area=bizerte&start=2008&end=2015").json()["meta"]["critical_months"]
+
+    # The default end is the last year with data; a 2026 row moves it (and /health's data_end_year).
+    with pg.engine.begin() as c:  # a new approved version, so the API reloads the frame
+        c.execute(text("UPDATE dataset_versions SET status = 'superseded' WHERE id = 1"))
+        c.execute(text("INSERT INTO dataset_versions (parent_id, calibration_version_id, status, created_at, "
+                       "approved_at) VALUES (1, 1, 'approved', now(), now())"))
+    add_cell_months(pg.engine, [(73, 18, 2026, 10, 9.0, True)])
+    monkeypatch.setattr(core, "_utcnow", lambda: datetime(2026, 11, 15, 4, tzinfo=timezone.utc))
+    assert api.get("/health").json()["data_end_year"] == 2026
+    body = api.get("/calendar?area=bizerte").json()
+    assert (body["months"][0]["year"], body["months"][-1]["year"]) == (2001, 2026)
+    cov2026 = [m["coverage"] for m in body["months"] if m["year"] == 2026]
+    assert cov2026 == ["none"] * 9 + ["partial", "none", "none"]  # November: no row; December: future
+    assert api.get("/calendar?area=bizerte&end=2025").json()["months"][-1]["year"] == 2025  # explicit end kept
 
 
 def test_calendar_uses_the_parquet_without_an_approved_version(api, pg, tmp_path, monkeypatch):
@@ -240,6 +333,10 @@ def test_processing_endpoints_show_a_held_and_an_approved_run(boot, api, setting
     # /calendar now serves dataset version 2 (the new November 2026 rows are in the frame).
     assert api.get("/health").json()["dataset_version_id"] == 2
     assert ((core.get_data().year == 2026).sum()) == len(NOV_KEYS)
+    # The near-real-time November is published partial; the default end follows it to 2026.
+    assert api.get("/health").json()["data_end_year"] == 2026
+    nov = next(m for m in api.get("/calendar?area=bizerte").json()["months"] if (m["year"], m["month"]) == (2026, 11))
+    assert nov["coverage"] == "partial"
 
     # I1: none of these GETs wrote anything.
     assert table_digest(pg.engine) == before

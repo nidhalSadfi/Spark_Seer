@@ -35,6 +35,7 @@ export default function RecentActivity({ summaries, threshold = 20 }) {
                 </p>
                 <p className="text-xs text-muted">
                   vs. historical median for {MONTHS[r.month]} {r.year}
+                  {r.partial && <span className="text-yellow-200"> · partial month, still being observed</span>}
                 </p>
               </div>
             </motion.li>

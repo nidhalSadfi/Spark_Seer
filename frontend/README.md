@@ -57,7 +57,31 @@ The dashboard reads the EmberLedger backend: `GET /health`, `/areas`, `/calendar
 | Overview → weather outlook | `/weather?area=` |
 | Fire Reports → weather and info for a confirmed report | `/weather?lat=&lon=` |
 | Header badge: live / synthetic / offline | `/health` + `/validation.synthetic` |
+| Last year of the year pickers and the calendar | `/health` field `data_end_year` (2025 if absent or offline) |
+| Partial / no-data months in the calendar, stats and Data Explorer | `/calendar` field `coverage` |
+| Processing Center (`/dashboard/processing`) | `/processing/status`, `/processing/jobs`, `/processing/jobs/<id>`, `/processing/datasets` |
 
 - If the backend is unreachable the app falls back to generated sample data and says so in the header and page footers.
 - If `/validation` reports `"synthetic": true` (backend running `make_fake_data.py`), the UI labels everything as synthetic test data.
 - The dataset covers Tunisia and northern Algeria (north of 34°N); an area drawn elsewhere on the map shows a "no detections" notice.
+- **End year.** `/calendar` is called without `end`, so the API's default (its last year with data, e.g. 2026 with the
+  database) decides; the year pickers end at `/health`'s `data_end_year`. `DATA_END_YEAR` (2025, `services/constants.js`) is
+  only the fallback while `/health` has not answered, when the API is offline (sample data) or for an older API.
+- **Missing is not zero.** A `/calendar` month with `coverage: "none"` (no data loaded, or in the future) is shown as no data
+  (blank calendar cell, empty table cell and CSV value, left out of medians and "latest month"), never as the API's zero
+  fill. A `"partial"` month (near-real-time, still being observed) gets a dashed yellow outline and a *partial* mark, and is
+  left out of historical medians. Logic: `src/utils/calendarMatrix.js` and `src/utils/stats.js`.
+
+## Processing Center
+`/dashboard/processing` (sidebar: *Processing Center*) shows what the backend worker did with each FIRMS poll: scheduler
+state, approved dataset and calibration versions, the job list (filter by kind and status), and a job drawer (`?job=<id>`
+in the URL) with the steps timeline, counts, hard gates G1-G4, soft flags, the decision and its basis, and the three-agent
+review (Filter, Harmonization and Validation reviewers, the verdict with reasons and flagged cell-months, every LLM attempt
+with model, outcome, latency, tokens and error, so fallbacks between free models are visible). It is read-only (no "run"
+button) and refreshes every 30 s while the tab is visible. Without a database the API answers 503 and the page says the
+processing database is not connected; there is no mock data. Mapping: `src/utils/processing.js`.
+
+## Dev checks
+Plain Node scripts for the pure mapping functions (no test runner): `node dev-checks/live-data.check.mjs` (live fires,
+reports) and `node dev-checks/processing-calendar.check.mjs` (job-detail mapping, calendar coverage, stats skipping
+"none" months).

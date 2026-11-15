@@ -18,6 +18,9 @@ export const FALLBACK_AREAS = [
   { id: 'ne_algeria', name: 'Northeast Algeria', bbox: [7.0, 36.4, 8.6, 37.0] },
 ]
 
+/** Outline of a "partial" calendar month (near-real-time, still being observed); yellow-300. */
+export const PARTIAL_BORDER = '#fde047'
+
 /** Calendar flags returned by GET /calendar. */
 export const FLAGS = {
   high: { label: 'Unusually active', short: 'High', tone: 'fire' },
@@ -27,6 +30,10 @@ export const FLAGS = {
 }
 
 export const DATA_START_YEAR = 2001
+/**
+ * Last year of the offline mock, and the fallback while GET /health has not given `data_end_year`
+ * (FilterContext `dataEndYear`). With the API, the dashboard ends at the API's last year with data.
+ */
 export const DATA_END_YEAR = 2025
 export const VIIRS_START_YEAR = 2012
 
