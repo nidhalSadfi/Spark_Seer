@@ -9,6 +9,10 @@ from test_api import FLAGS, check_calendar
 
 @pytest.fixture
 def fake(tmp_path, monkeypatch):
+    # The fake data is the North Africa demo; the world regions (spec §16) would only add cells.
+    from api import core
+    north_africa = [a for a in core.get_areas() if a["group"] == "north_africa"]
+    monkeypatch.setattr(core, "get_areas", lambda: north_africa)
     make_fake_data.main(tmp_path, optional=True)
     monkeypatch.setenv("EMBER_DATA", str(tmp_path / "harmonized.parquet"))
     return TestClient(app)

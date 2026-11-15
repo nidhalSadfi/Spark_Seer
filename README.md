@@ -51,7 +51,9 @@ pytest -m pg                      # PostgreSQL tests against TEST_DATABASE_URL (
 approved r of `data/inter_viirs_fit.json`, and the static-mask version of `STATIC_MASK_FILE` or
 `--mask`) and approved dataset version 1 (every parquet row into `cell_month`; VIIRS is NULL
 before 2012, spec §15). If any calibration or dataset version already exists it does nothing and
-exits 0. `--parquet`, `--validation`, `--inter-viirs` and `--mask` override the files. Set
+exits 0. `--parquet` (or `--data`), `--validation`, `--inter-viirs` and `--mask` override the files;
+`--replace` supersedes existing versions with new ones (the world cut-over, see
+`backend/README.md`, "World coverage"). Set
 `STATIC_MASK_FILE` the same way for the worker: `firms_poll` refuses to run with a mask other than
 the calibration's (I6).
 

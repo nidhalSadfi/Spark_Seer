@@ -12,7 +12,7 @@ ENV_VARS = ("DATABASE_URL", "FIRMS_MAP_KEY", "FIRMS_MAP_KEY_1", "FIRMS_POLL_INTE
             "RECONCILE_DAY_OF_MONTH", "COUNTRY_BOUNDARY_FILE", "STATIC_MASK_FILE", "DRIFT_WARN_PCT",
             "DRIFT_MIN_COUNT", "OPENROUTER_API_KEY", "OPENROUTER_MODELS", "OPENROUTER_BASE_URL",
             "OPENROUTER_TIMEOUT_S", "OPENROUTER_RETRIES", "OPENROUTER_QUOTA_CHECK", "REVIEW_DEADLINE_S",
-            "REVIEW_SUMMARY_MAX_CHARS")
+            "REVIEW_SUMMARY_MAX_CHARS", "PROCESSING_MIN_LAT")
 FAKE_OPENROUTER_KEY = "sk-or-v1-0000000000000000000000000000000000000000000000000000000000fake"
 
 
@@ -48,8 +48,9 @@ def test_default_bbox_costs_one_firms_tile():
 def test_default_bbox_contains_every_demo_area():
     w, s, e, n = DEFAULT_REGION_BBOX
     areas = json.loads((Path(__file__).resolve().parent.parent / "data" / "areas.json").read_text())
-    assert areas and all(w <= a["bbox"][0] and s <= a["bbox"][1] and e >= a["bbox"][2] and n >= a["bbox"][3]
-                         for a in areas)
+    areas = [a for a in areas if a["group"] == "north_africa"]  # the world regions need FIRMS_BBOX=world
+    assert len(areas) == 4 and all(w <= a["bbox"][0] and s <= a["bbox"][1] and e >= a["bbox"][2]
+                                   and n >= a["bbox"][3] for a in areas)
 
 
 def test_env_overrides(monkeypatch):
@@ -192,3 +193,37 @@ def test_models_without_a_key_are_a_clear_error(monkeypatch):
     monkeypatch.setenv("OPENROUTER_MODELS", "vendor/a")
     with pytest.raises(SettingsError, match="OPENROUTER_API_KEY"):
         Settings.from_env()
+
+
+# -- world coverage (spec §16) -------------------------------------------------------------------
+
+def test_firms_bbox_world(monkeypatch):
+    from firms_tool.area_api import Window, call_cost
+    from datetime import date
+
+    monkeypatch.setenv("FIRMS_BBOX", " World ")
+    s = Settings.from_env()
+    assert s.firms_bbox == "world" and s.firms_bbox_arg == "world" and s.firms_is_world
+    assert s.firms_bbox_extent == (-180.0, -90.0, 180.0, 90.0)
+    # 6 x 3 tiles of 60 degrees: 36 transactions per day, ~290 for a 2-day poll of 4 sources.
+    assert bbox_tiles(s.firms_bbox_arg) == 18
+    assert 4 * call_cost(Window("MODIS_NRT", date(2026, 11, 14), 2), s.firms_bbox_arg) == 288
+    assert not Settings().firms_is_world and Settings().firms_bbox_extent == DEFAULT_REGION_BBOX
+    with pytest.raises(SettingsError, match="FIRMS_BBOX"):
+        Settings(firms_bbox="worlds")
+    monkeypatch.setenv("FIRMS_BBOX", "earth")
+    with pytest.raises(SettingsError, match="FIRMS_BBOX must be 'world' or four numbers"):
+        Settings.from_env()
+
+
+def test_processing_min_lat(monkeypatch):
+    assert Settings.from_env().processing_min_lat == 34.0  # the North Africa default is unchanged
+    monkeypatch.setenv("PROCESSING_MIN_LAT", "None")
+    assert Settings.from_env().processing_min_lat is None
+    monkeypatch.setenv("PROCESSING_MIN_LAT", "-10.5")
+    assert Settings.from_env().processing_min_lat == -10.5
+    monkeypatch.setenv("PROCESSING_MIN_LAT", "north")
+    with pytest.raises(SettingsError, match="PROCESSING_MIN_LAT"):
+        Settings.from_env()
+    with pytest.raises(SettingsError, match="PROCESSING_MIN_LAT"):
+        Settings(processing_min_lat=95.0)

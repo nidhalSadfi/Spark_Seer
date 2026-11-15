@@ -201,3 +201,25 @@ def test_i1_api_process_never_imports_worker_crewai_or_llm_clients(client):
     r = run_api_process({**data, "DATABASE_URL": UNREACHABLE})
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == str([503] * 6 + [200, 200, 503])
+
+
+def test_select_bbox_equals_the_full_mask():
+    """The sorted-cy range scan (spec §16: millions of rows) selects exactly the rows, in the same
+    order, that the plain mask over the whole frame does, sorted or not."""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(2)
+    n = 50_000
+    H = pd.DataFrame({"cy": rng.integers(-180, 180, n).astype("int32"), "cx": rng.integers(-360, 360, n).astype("int32"),
+                      "year": rng.integers(2001, 2027, n).astype("int16"), "month": rng.integers(1, 13, n).astype("int8"),
+                      "harmonized": rng.random(n)})
+    boxes = [(8.3, 36.0, 9.8, 37.2), (-66.0, -14.0, -44.0, -2.0), (-180, -90, 180, 90), (-0.25, -0.25, 0.0, 0.0),
+             (179.5, 89.5, 180, 90), (10, 10, 10, 10), (-180, -90, -179.9, -89.9)]
+    for frame in (H, H.sort_values(["cy", "cx", "year", "month"], ignore_index=True)):
+        for box in boxes:
+            x0, y0, x1, y1 = box
+            mask = frame[(frame.cx >= int(np.floor(x0 / 0.5))) & (frame.cx <= int(np.floor(x1 / 0.5)))
+                         & (frame.cy >= int(np.floor(y0 / 0.5))) & (frame.cy <= int(np.floor(y1 / 0.5)))
+                         & frame.year.between(2005, 2020)]
+            pd.testing.assert_frame_equal(core.select_bbox(frame, box, 2005, 2020), mask)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -23,6 +24,13 @@ class FakeResponse:
         self.status_code = status
         self.text = text
 
+    def json(self):
+        return json.loads(self.text)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
 
 def read_table(source: str) -> list[dict[str, str]]:
     with (FIXTURES / f"{source}.csv").open(newline="") as fh:
@@ -36,12 +44,17 @@ class FakeFirmsSession:
         self.fail_sources: set[str] = set()                   # answered with HTTP 400 (-> ApiError)
         self.urls: list[str] = []
         self.windows: list[tuple[str, date, int]] = []        # (source, start, days) per area call
+        self.used = 0                                         # transactions reported by mapkey_status
+        self.status_calls = 0
 
     def get(self, url, params=None, timeout=None):
         self.urls.append(url)
         parts = urlparse(url).path.strip("/").split("/")
         if parts[:3] == ["api", "data_availability", "csv"]:
             return FakeResponse(200, self.availability_text)
+        if parts[:2] == ["mapserver", "mapkey_status"]:
+            self.status_calls += 1
+            return FakeResponse(200, json.dumps({"transaction_limit": 5000, "current_transactions": self.used}))
         if parts[:3] == ["api", "area", "csv"] and len(parts) == 8:
             source, days, start = parts[4], int(parts[6]), date.fromisoformat(parts[7])
             self.windows.append((source, start, days))

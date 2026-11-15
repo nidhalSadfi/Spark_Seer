@@ -14,7 +14,22 @@ so the database serves the same numbers as the parquet file:
   NOAA-20/21 counts are unknown (NULL). The archive years are closed: is_partial = false.
 
 Idempotent: if a calibration or dataset version exists it does nothing (exit 0). Everything is one
-transaction, so a failure leaves the database as it was.
+transaction, so a failure leaves the database as it was. The rows go in with COPY (a world dataset
+has millions of cell-months, spec §16).
+
+World dataset (spec §16), with explicit paths:
+
+    python -m worker.bootstrap --data data/world/harmonized.parquet \
+        --validation data/world/harmonized_validation.json --inter-viirs data/world/inter_viirs_fit.json \
+        --mask data/world/static_mask.json [--replace]
+
+`--replace` (the cut-over, spec §16; needs the user's approval): when versions already exist,
+create a NEW approved calibration version and a NEW approved dataset version from the files, in
+ONE transaction. The previous approved versions become `superseded` (never deleted), every
+approved cell_month row is copied to cell_month_history (replaced_by_version = the new dataset
+version) before cell_month is reloaded, and the new dataset version's parent is the old one.
+Afterwards set STATIC_MASK_FILE to the new mask (firms_poll refuses a mask that is not the
+calibration's, I6). Without versions, --replace is a plain bootstrap.
 
 Exit codes: 0 done or already bootstrapped, 1 database unreachable or not migrated, 2 bad input.
 """
@@ -46,6 +61,7 @@ from worker import store
 log = logging.getLogger("worker.bootstrap")
 
 LABEL = "bootstrap"
+REPLACE_LABEL = "bootstrap-replace"
 PARQUET_COLUMNS = ("cy", "cx", "year", "month", "MODIS", "VIIRS", "k", "k_month", "support", "harmonized", "source")
 SOURCE_REFERENCE = {"MODIS*k": REF_MODIS, "VIIRS": REF_SNPP}
 
@@ -67,8 +83,8 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def parquet_rows(df: pd.DataFrame, calibration_version_id: int) -> list[dict]:
-    """harmonized.parquet rows as cell_month rows (see the module docstring for the mapping)."""
+def check_parquet(df: pd.DataFrame) -> None:
+    """BootstrapError unless the frame is a harmonized.parquet this module can map."""
     missing = [c for c in PARQUET_COLUMNS if c not in df.columns]
     if missing:
         raise BootstrapError(f"harmonized parquet lacks column(s) {', '.join(missing)}")
@@ -84,6 +100,12 @@ def parquet_rows(df: pd.DataFrame, calibration_version_id: int) -> list[dict]:
     pre = df["year"].to_numpy() < DEFAULT_PARAMS.first_viirs_year
     if (df.loc[pre, "VIIRS"] != 0).any():
         raise BootstrapError("harmonized parquet has VIIRS counts before 2012")
+
+
+def parquet_rows(df: pd.DataFrame, calibration_version_id: int) -> list[dict]:
+    """harmonized.parquet rows as cell_month rows (see the module docstring for the mapping).
+    Row by row; `parquet_frame` is the same mapping, vectorised, for the COPY."""
+    check_parquet(df)
     has_days = "MODIS_days" in df.columns and "VIIRS_days" in df.columns
     out = []
     for i, r in enumerate(df.itertuples(index=False)):
@@ -102,9 +124,41 @@ def parquet_rows(df: pd.DataFrame, calibration_version_id: int) -> list[dict]:
     return out
 
 
+def parquet_frame(df: pd.DataFrame, calibration_version_id: int) -> pd.DataFrame:
+    """`parquet_rows` as a frame of store.CELL_COLUMNS (nullable Int64 counts, quality_flags as the
+    text[] literal "{}"), vectorised for millions of rows. tests/test_world_scale_pg.py checks it
+    against parquet_rows value by value."""
+    check_parquet(df)
+    has_days = "MODIS_days" in df.columns and "VIIRS_days" in df.columns
+    year = df["year"].astype("int64").to_numpy()
+    before = year < DEFAULT_PARAMS.first_viirs_year
+    viirs = pd.array(df["VIIRS"].to_numpy(dtype=float), dtype="Int64")
+    viirs[before] = pd.NA
+    none = pd.array([pd.NA] * len(df), dtype="Int64")
+    modis_days = pd.array(df["MODIS_days"].to_numpy(dtype=float), dtype="Int64") if has_days else none.copy()
+    viirs_days = pd.array(df["VIIRS_days"].to_numpy(dtype=float), dtype="Int64") if has_days else none.copy()
+    viirs_days[before] = pd.NA
+    days = modis_days.copy()
+    days[~before] = viirs_days[~before]
+    out = pd.DataFrame({
+        "cy": df["cy"].astype("int64").to_numpy(), "cx": df["cx"].astype("int64").to_numpy(), "year": year,
+        "month": df["month"].astype("int64").to_numpy(),
+        "modis": pd.array(df["MODIS"].to_numpy(dtype=float), dtype="Int64"),
+        "viirs_ref": viirs.astype("Float64"),
+        "harmonized": df["harmonized"].to_numpy(dtype=float), "k": df["k"].to_numpy(dtype=float),
+        "support": df["support"].to_numpy(dtype=float), "days": days, "modis_days": modis_days,
+        "viirs_days": viirs_days, "reference": df["source"].map(SOURCE_REFERENCE).to_numpy(dtype=object),
+        "n_snpp": viirs, "n_noaa20": none, "n_noaa21": none.copy(), "is_partial": False, "quality_flags": "{}",
+        "calibration_version_id": int(calibration_version_id)})
+    return out[list(store.CELL_COLUMNS)]
+
+
 def bootstrap(engine: Engine, *, parquet: Path, validation: Path, inter_viirs: Path, mask: Path | None,
-              now: datetime | None = None) -> BootstrapResult:
-    """Create calibration 1 and dataset 1 in one transaction, or do nothing if versions exist."""
+              now: datetime | None = None, replace: bool = False) -> BootstrapResult:
+    """Create calibration 1 and dataset 1 in one transaction, or do nothing if versions exist.
+
+    replace=True: if versions exist, create a new approved calibration and dataset version from
+    the files instead, superseding the old ones (see the module docstring), in one transaction."""
     now = now or datetime.now(timezone.utc)
     parquet, validation, inter_viirs = Path(parquet), Path(validation), Path(inter_viirs)
     for path in (parquet, validation, inter_viirs, *([Path(mask)] if mask else [])):
@@ -116,10 +170,17 @@ def bootstrap(engine: Engine, *, parquet: Path, validation: Path, inter_viirs: P
         existing = c.execute(text("SELECT (SELECT count(*) FROM calibration_versions) AS cal, "
                                   "(SELECT count(*) FROM dataset_versions) AS ds, "
                                   "(SELECT id FROM dataset_versions WHERE status = 'approved') AS approved")).one()
-        if existing.cal or existing.ds:
+        replacing = bool(existing.cal or existing.ds)
+        if replacing and not replace:
             return BootstrapResult(False, None, existing.approved, 0,
                                    f"already bootstrapped ({existing.cal} calibration and {existing.ds} dataset "
                                    f"version(s); approved dataset version {existing.approved}): nothing done")
+        old_cal = c.scalar(text("SELECT id FROM calibration_versions WHERE status = 'approved'")) if replacing else None
+        old_ds = existing.approved if replacing else None
+        if replacing:
+            # One approved version of each at a time (partial unique indexes): supersede first.
+            c.execute(text("UPDATE calibration_versions SET status = 'superseded' WHERE status = 'approved'"))
+            c.execute(text("UPDATE dataset_versions SET status = 'superseded' WHERE status = 'approved'"))
 
         report = json.loads(validation.read_text())
         fit = json.loads(inter_viirs.read_text())
@@ -132,7 +193,7 @@ def bootstrap(engine: Engine, *, parquet: Path, validation: Path, inter_viirs: P
         cal = cal.with_global_r(r_global, version="1")
         parquet_sha = _sha256(parquet)
         cal_id = store.insert_calibration(
-            c, cal, status="approved", label=LABEL, k_table_ref=f"parquet:{parquet.name} sha256:{parquet_sha}",
+            c, cal, status="approved", label=REPLACE_LABEL if replacing else LABEL, k_table_ref=f"parquet:{parquet.name} sha256:{parquet_sha}",
             mask_version=static_mask.version if static_mask else None,
             mask_sha256=static_mask.content_sha256 if static_mask else None,
             validation_report={
@@ -141,6 +202,7 @@ def bootstrap(engine: Engine, *, parquet: Path, validation: Path, inter_viirs: P
                 "inter_viirs_fit": fit,
                 "inter_viirs_fit_file": {"path": inter_viirs.name, "sha256": _sha256(inter_viirs)},
                 "mask": static_mask.summary() if static_mask else None,
+                "replaces_calibration_version": old_cal,
                 "notes": ["k is the one published in the parquet: pipeline/calibrate.harmonize refits it on "
                           "2012-2021, which includes the validation test years, so it differs from the k "
                           "scored in harmonized_validation (spec §15)",
@@ -148,29 +210,52 @@ def bootstrap(engine: Engine, *, parquet: Path, validation: Path, inter_viirs: P
             now=now)
 
         df = pd.read_parquet(parquet)
+        frame = parquet_frame(df, cal_id)
         dataset_id = c.scalar(text("""
             INSERT INTO dataset_versions (parent_id, job_id, calibration_version_id, status, created_at, approved_at,
                                           summary)
-            VALUES (NULL, NULL, :cal, 'approved', :now, :now, CAST(:summary AS jsonb)) RETURNING id"""),
-            {"cal": cal_id, "now": now, "summary": json.dumps({
-                "source": "bootstrap", "parquet": parquet.name, "parquet_sha256": parquet_sha, "rows": int(len(df)),
+            VALUES (:parent, NULL, :cal, 'approved', :now, :now, CAST(:summary AS jsonb)) RETURNING id"""),
+            {"parent": old_ds, "cal": cal_id, "now": now, "summary": json.dumps({
+                "source": "bootstrap_replace" if replacing else "bootstrap", "parquet": parquet.name,
+                "parquet_sha256": parquet_sha, "rows": int(len(df)),
                 "years": [int(df.year.min()), int(df.year.max())] if len(df) else None,
-                "viirs_null_before_2012": int((df.year < DEFAULT_PARAMS.first_viirs_year).sum())})})
-        rows = parquet_rows(df, cal_id)
-        store.insert_cell_month(c, rows, dataset_id)
-    return BootstrapResult(True, cal_id, dataset_id, len(rows),
+                "viirs_null_before_2012": int((df.year < DEFAULT_PARAMS.first_viirs_year).sum()),
+                **({"replaces_dataset_version": old_ds, "replaces_calibration_version": old_cal}
+                   if replacing else {})})})
+        del df
+        history = 0
+        if replacing:
+            history = c.execute(text(f"""
+                INSERT INTO cell_month_history ({", ".join(store.CELL_COLUMNS)}, dataset_version_id,
+                                                replaced_by_version, replaced_at)
+                SELECT {", ".join(store.CELL_COLUMNS)}, dataset_version_id, :version, :now FROM cell_month"""),
+                {"version": dataset_id, "now": now}).rowcount
+            c.execute(text("DELETE FROM cell_month"))
+        store.copy_cell_month(c, frame, dataset_id)
+        rows = len(frame)
+    if replacing:
+        return BootstrapResult(True, cal_id, dataset_id, rows,
+                               f"replaced calibration version {old_cal} and dataset version {old_ds} (now superseded) "
+                               f"with calibration version {cal_id} and dataset version {dataset_id} ({rows} "
+                               f"cell-months; {history} previous rows kept in cell_month_history)")
+    return BootstrapResult(True, cal_id, dataset_id, rows,
                            f"bootstrapped calibration version {cal_id} and dataset version {dataset_id} "
-                           f"({len(rows)} cell-months)")
+                           f"({rows} cell-months)")
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m worker.bootstrap",
-                                description="Load approved calibration 1 and dataset 1 (idempotent).")
-    p.add_argument("--parquet", type=Path, default=Path("data/harmonized.parquet"))
+                                description="Load approved calibration 1 and dataset 1 (idempotent), or with "
+                                            "--replace a new approved calibration and dataset version.")
+    p.add_argument("--parquet", "--data", dest="parquet", type=Path, default=Path("data/harmonized.parquet"),
+                   help="harmonized parquet (pipeline/calibrate.py output), e.g. data/world/harmonized.parquet")
     p.add_argument("--validation", type=Path, default=None,
                    help="default: <parquet name>_validation.json next to the parquet")
     p.add_argument("--inter-viirs", type=Path, default=Path("data/inter_viirs_fit.json"))
     p.add_argument("--mask", type=Path, default=None, help="static-source mask JSON (default: STATIC_MASK_FILE)")
+    p.add_argument("--replace", action="store_true",
+                   help="if versions exist, supersede them with a new approved calibration and dataset version "
+                        "built from these files, in one transaction (the world cut-over, spec §16)")
     return p.parse_args(argv)
 
 
@@ -196,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     engine = make_engine(settings.database_url)
     try:
         result = bootstrap(engine, parquet=args.parquet, validation=validation, inter_viirs=args.inter_viirs,
-                           mask=mask)
+                           mask=mask, replace=args.replace)
     except BootstrapError as e:
         log.error("%s", e)
         return 2

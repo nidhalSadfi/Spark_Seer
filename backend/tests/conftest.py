@@ -49,7 +49,8 @@ def api_without_database(monkeypatch):
 
     API tests that need PostgreSQL set DATABASE_URL to their own TEST_DATABASE_URL schema."""
     from api import core, database
-    for var in ("DATABASE_URL", "REPORTS_ADMIN_TOKEN", "API_VERSION_CHECK_S", "API_DB_CONNECT_TIMEOUT_S"):
+    for var in ("DATABASE_URL", "REPORTS_ADMIN_TOKEN", "API_VERSION_CHECK_S", "API_DB_CONNECT_TIMEOUT_S",
+                "FIRES_LIVE_MAX_DETECTIONS", "FIRES_LIVE_GRID_SPAN_DEG", "FIRES_LIVE_FINE_GRID_MAX_SPAN_DEG"):
         monkeypatch.delenv(var, raising=False)
     database.reset()
     core.reset_cache()
