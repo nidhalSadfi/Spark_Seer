@@ -1,0 +1,17 @@
+# SITE_ADDRESS: your domain (e.g. emberguard.earth) for automatic HTTPS (Let's Encrypt),
+# or ":80" for plain HTTP (local test, or before DNS points at the server).
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# API: https://<domain>/api/calendar -> api:8000/calendar
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Dashboard (single-page app): unknown paths fall back to index.html.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
