@@ -1,8 +1,10 @@
-"""firms_poll handler: fetch FIRMS NRT windows, keep raw provenance, upsert raw_detections (spec §4, §6 1-3).
+"""firms_poll handler: fetch FIRMS NRT windows, keep raw provenance, upsert raw_detections, then
+process the pending rows (spec §4, §6).
 
-Phase 1 stops after classification: rows that are new or modified get needs_processing = true and
-stay pending until Phase 2+ processes and promotes them. Filtering, gridding and harmonization are
-not done here.
+Rows that are new or modified get needs_processing = true. With no new, modified or pending row the
+job ends `no_change` before anything that could import crewai is loaded (I3). Otherwise
+worker.process_pending recomputes the affected cell-months with the approved calibration, runs the
+review flow and promotes, holds or rejects; only a promotion clears needs_processing.
 """
 
 from __future__ import annotations
@@ -23,12 +25,12 @@ from firms_tool.area_api import Window, call_cost, windows_for
 from firms_tool.sensors import SENSORS, Sensor
 from worker.detections import Detection, parse_csv
 from worker.jobs import JobContext, JobError, describe
+from worker.store import record_sensor_days
 
 log = logging.getLogger("worker.firms_poll")
 
 # NRT source per sensor, in catalogue order: MODIS_NRT, VIIRS_SNPP_NRT, VIIRS_NOAA20_NRT, VIIRS_NOAA21_NRT.
 NRT_SOURCES: tuple[tuple[str, Sensor], ...] = tuple((s.api_nrt, s) for s in SENSORS.values())
-PHASE2_NOTE = "processing not implemented until Phase 2"
 COUNT_KEYS = ("fetched", "new", "modified", "unchanged", "malformed", "duplicates")
 
 
@@ -128,11 +130,10 @@ def run(ctx: JobContext) -> str:
     if errors:
         raise JobError("FIRMS fetch failed for " + "; ".join(f"{s}: {e}" for s, e in errors.items()))
     if ctx.counts["new"] == 0 and ctx.counts["modified"] == 0 and pending == 0:
-        return "no_change"
-    with ctx.step("processing") as step:
-        step.status = "skipped"
-        step.summary.update(note=PHASE2_NOTE, pending=pending)
-    return "succeeded"
+        return "no_change"  # I3: decided before worker.process_pending (and so crewai) is imported
+    from worker.process_pending import process_pending
+
+    return process_pending(ctx, availability)
 
 
 def _describe_plan(plan: SourcePlan, watermark: date | None, availability: dict[str, tuple[date, date]]) -> dict:
@@ -199,6 +200,7 @@ def store_response(ctx: JobContext, w: Window, bbox: str, body: str,
         path = raw_path(ctx.settings.firms_raw_dir, w.source, fetched_at, fetch_id)
         _write_gz(path, body)
         c.execute(text("UPDATE firms_fetches SET raw_path = :path WHERE id = :id"), {"path": str(path), "id": fetch_id})
+        record_sensor_days(c, w.source, w.start, w.days, hi, fetch_id, fetched_at)
         classified = upsert_detections(c, parsed.detections, fetch_id, ctx.job_id)
     return fetch_id, {"fetched": parsed.rows, **classified, "malformed": parsed.malformed,
                       "duplicates": parsed.duplicates}

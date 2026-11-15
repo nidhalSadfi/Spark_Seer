@@ -41,12 +41,30 @@ docker compose up -d db
 set -a; . ./.env; set +a          # the Python code reads the environment, not .env
 cd backend
 alembic upgrade head              # creates the processing tables (alembic upgrade head --sql prints the DDL)
+python -m worker.bootstrap        # once: approved calibration 1 + dataset 1 from data/ (a second run does nothing)
 python -m worker --once           # one scheduler tick; without --once it ticks every WORKER_TICK_SECONDS
 pytest -m pg                      # PostgreSQL tests against TEST_DATABASE_URL (skipped if unreachable)
 ```
 
+`python -m worker.bootstrap` (run from `backend/`) loads, in one transaction, calibration version 1
+(k from `data/harmonized.parquet`, its validation report `data/harmonized_validation.json`, the
+approved r of `data/inter_viirs_fit.json`, and the static-mask version of `STATIC_MASK_FILE` or
+`--mask`) and approved dataset version 1 (every parquet row into `cell_month`; VIIRS is NULL
+before 2012, spec §15). If any calibration or dataset version already exists it does nothing and
+exits 0. `--parquet`, `--validation`, `--inter-viirs` and `--mask` override the files. Set
+`STATIC_MASK_FILE` the same way for the worker: `firms_poll` refuses to run with a mask other than
+the calibration's (I6).
+
 The worker polls NASA FIRMS (`firms_poll`, every `FIRMS_POLL_INTERVAL_HOURS`) and stores raw
-detections; see `docs/processing/ARCHITECTURE.md`. It needs `pip install -r requirements-worker.txt`
+detections; see `docs/processing/ARCHITECTURE.md`. When there are new, modified or still-pending
+detections, it recomputes their cell-months (all stored detections of each) with the approved
+calibration, runs the review flow, writes the rows to `cell_month_staging` and then publishes them
+in one transaction (`cell_month`, `cell_month_history`, a new `dataset_versions` row), or keeps
+them unpublished when the run is held or rejected; those detections stay pending for the next
+poll. Each job records its steps (`job_steps`), LLM attempts (`llm_attempts`), `ai_review` and the
+decision with the gate results and the Validation reviewer's verdict (`processing_jobs.decision`).
+Staging rows are deleted `STAGING_RETENTION_DAYS` (default 30) after their job finished.
+`monthly_reconcile` is not implemented yet; its schedule stays disabled. It needs `pip install -r requirements-worker.txt`
 (requirements.txt plus CrewAI, pinned to 1.15.x); the API keeps using `requirements.txt` and never
 imports CrewAI. `requirements-dev.txt` includes the worker requirements, so `pytest` covers both. Only the `db` service exists for now; `api` and
 `worker` services arrive in later phases. `docker/initdb/` creates the `emberguard_test` database
@@ -76,8 +94,8 @@ that passed the gates is still published (D3, `ai_review = "unavailable"`).
 
 Before importing CrewAI the worker switches off its telemetry, tracing, version check and `.env`
 loading, and points its storage at `CREWAI_STORAGE_DIR` (default: a per-user directory under the
-system temp dir), so CrewAI writes nothing under `$HOME`. Phase 3 is not wired into `firms_poll`
-yet; tests use stub models only.
+system temp dir), so CrewAI writes nothing under `$HOME`. `firms_poll` runs this flow for every
+job with pending detections; tests use stub models only.
 
 ## Processing science
 

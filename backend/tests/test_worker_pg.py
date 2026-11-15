@@ -6,6 +6,7 @@ SQLite fallback, because SKIP LOCKED, advisory locks and partial indexes are wha
 """
 import gzip
 import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -27,9 +28,12 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
+from conftest import make_dataset  # noqa: E402
 from db import make_engine, safe_url  # noqa: E402
 from firms_fake import FakeFirmsSession, client_factory  # noqa: E402
+from processing.inter_viirs import FIT_KIND  # noqa: E402
 from settings import Settings  # noqa: E402
+from worker.bootstrap import bootstrap  # noqa: E402
 from worker.handlers import HANDLERS  # noqa: E402
 from worker.scheduler import Scheduler  # noqa: E402
 from worker.schedules import FIRMS_POLL, MONTHLY_RECONCILE, lock_key  # noqa: E402
@@ -39,6 +43,9 @@ pytestmark = pytest.mark.pg
 BACKEND = Path(__file__).resolve().parent.parent
 T0 = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
 SOURCES = ("MODIS_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")  # S-NPP is past its coverage_end on T0
+# firms_poll steps when it processes (review disabled: OPENROUTER_MODELS empty).
+PROCESSING_STEPS = ["prepare", "filter", "aggregate", "harmonize", "completeness", "gates", "drift", "review",
+                    "decide", "stage", "publish"]
 
 
 # -- fixtures ------------------------------------------------------------------------------------
@@ -111,6 +118,24 @@ class FakeClock:
         self.now += timedelta(**kw)
 
 
+def bootstrap_synthetic(engine, folder: Path, r: float = 0.98, mask=None):
+    """Calibration 1 + dataset 1 from a SYNTHETIC parquet (conftest.make_dataset) and fit file."""
+    folder.mkdir(parents=True, exist_ok=True)
+    parquet = Path(make_dataset(folder, optional_cols=True))
+    fit = folder / "inter_viirs_fit.json"
+    fit.write_text(json.dumps({"kind": FIT_KIND, "approved_r": r, "r_global": r, "status": "synthetic"}))
+    return bootstrap(engine, parquet=parquet, validation=folder / "harmonized_validation.json", inter_viirs=fit,
+                     mask=mask, now=T0 - timedelta(days=1))
+
+
+@pytest.fixture
+def boot(pg, tmp_path):
+    """pg with approved calibration 1 and dataset 1 loaded from synthetic files."""
+    result = bootstrap_synthetic(pg.engine, tmp_path / "boot")
+    assert result.created
+    return pg
+
+
 @pytest.fixture
 def settings(tmp_path):
     return Settings(firms_map_key="TESTKEY123", firms_raw_dir=tmp_path / "raw", firms_max_backfill_days=2)
@@ -155,7 +180,8 @@ def test_migration_creates_tables_and_the_one_active_job_index(pg):
                                         s=pg.schema)}
     assert {"schedules", "processing_jobs", "job_steps", "firms_fetches", "firms_availability",
             "raw_detections"} <= tables
-    assert not tables & {"cell_month", "dataset_versions", "llm_attempts"}  # Phase 4 tables
+    assert {"calibration_versions", "calibration_k", "dataset_versions", "cell_month", "cell_month_staging",
+            "cell_month_history", "llm_attempts", "sensor_day_coverage"} <= tables  # Phase 4 (0002)
     indexdef = one(pg.engine, "SELECT indexdef FROM pg_indexes WHERE schemaname = :s "
                               "AND indexname = 'processing_jobs_one_active_per_kind'", s=pg.schema).indexdef
     assert "UNIQUE" in indexdef and "queued" in indexdef and "running" in indexdef
@@ -184,7 +210,8 @@ def test_migration_downgrades_and_upgrades_again(pg):
 
 # -- ingestion -----------------------------------------------------------------------------------
 
-def test_first_poll_fetches_stores_and_classifies(pg, settings, firms):
+def test_first_poll_fetches_stores_and_classifies(boot, settings, firms):
+    pg = boot
     s = make_scheduler(pg.engine, settings, FakeClock(), firms)
     s.startup()
     [job_id] = s.tick()
@@ -198,10 +225,8 @@ def test_first_poll_fetches_stores_and_classifies(pg, settings, firms):
 
     st = steps(pg.engine, job_id)
     assert list(st) == ["availability", "planning", "fetch:MODIS_NRT", "fetch:VIIRS_NOAA20_NRT",
-                        "fetch:VIIRS_NOAA21_NRT", "storage", "processing"]
-    assert all(r.status == "succeeded" for n, r in st.items() if n != "processing")
-    assert st["processing"].status == "skipped"
-    assert st["processing"].summary["note"] == "processing not implemented until Phase 2"
+                        "fetch:VIIRS_NOAA21_NRT", "storage"] + PROCESSING_STEPS
+    assert all(r.status == "succeeded" for r in st.values())
     assert "coverage_end" in st["planning"].summary["sources"]["VIIRS_SNPP_NRT"]["skipped"]
     assert st["storage"].summary["per_source"]["MODIS_NRT"]["new"] == 4
     assert st["storage"].summary["totals"]["fetched"] == 11
@@ -224,7 +249,8 @@ def test_first_poll_fetches_stores_and_classifies(pg, settings, firms):
 
     det = rows(pg.engine, "SELECT * FROM raw_detections ORDER BY id")
     assert len(det) == 11
-    assert all(d.needs_processing and d.product == "NRT" and d.type is None for d in det)
+    # Processed and published in the same job: the promotion cleared needs_processing (§6).
+    assert all(not d.needs_processing and d.product == "NRT" and d.type is None for d in det)
     assert all(d.changed_in_job_id == job_id and d.first_seen_fetch_id == d.last_seen_fetch_id for d in det)
     modis = [d for d in det if d.source == "MODIS_NRT"]
     assert {(d.acq_date, d.satellite) for d in modis} == {(date(2026, 11, 13), "Aqua"), (date(2026, 11, 13), "Terra"),
@@ -232,40 +258,44 @@ def test_first_poll_fetches_stores_and_classifies(pg, settings, firms):
     assert all(d.delivered["latitude"] == d.latitude_raw for d in det)
 
 
-def test_same_data_twice_is_unchanged_and_no_change_needs_no_pending_rows(pg, settings, firms):
+def test_same_data_twice_is_unchanged_and_no_change_needs_no_pending_rows(boot, settings, firms):
+    pg = boot
     clock = FakeClock()
     s = make_scheduler(pg.engine, settings, clock, firms)
     s.startup()
     [first] = s.tick()
+    assert job(pg.engine, first).status == "succeeded"
+    # The first run's promotion cleared the pending flags: the same data again is no_change (I3).
     clock.advance(hours=3)
     [second] = s.tick()
     j = job(pg.engine, second)
-    # Rows from the first run are still pending (nothing clears them in Phase 1): not no_change.
     assert (j.status, j.fetched_count, j.new_count, j.modified_count, j.unchanged_count, j.pending_count) == \
-        ("succeeded", 11, 0, 0, 11, 11)
-    assert "processing" in steps(pg.engine, second)
+        ("no_change", 11, 0, 0, 11, 0)
+    assert not set(PROCESSING_STEPS) & set(steps(pg.engine, second))
     det = rows(pg.engine, "SELECT * FROM raw_detections")
-    assert len(det) == 11 and all(d.changed_in_job_id == first for d in det)
+    assert len(det) == 11 and all(d.changed_in_job_id == first and not d.needs_processing for d in det)
     assert all(d.last_seen_fetch_id != d.first_seen_fetch_id for d in det)
 
-    # Once a (Phase 4) promotion has cleared them, the same data again is no_change.
+    # A row still pending (e.g. from a held run) is processed even with no new or modified rows.
     with pg.engine.begin() as c:
-        c.execute(text("UPDATE raw_detections SET needs_processing = false"))
+        c.execute(text("UPDATE raw_detections SET needs_processing = true WHERE source = 'MODIS_NRT' "
+                       "AND acq_time_raw = '1240'"))
     clock.advance(hours=3)
     [third] = s.tick()
     j = job(pg.engine, third)
-    assert (j.status, j.new_count, j.modified_count, j.unchanged_count, j.pending_count) == ("no_change", 0, 0, 11, 0)
-    assert "processing" not in steps(pg.engine, third)
+    assert (j.status, j.new_count, j.modified_count, j.unchanged_count, j.pending_count, j.affected_count) == \
+        ("succeeded", 0, 0, 11, 1, 1)
+    assert list(steps(pg.engine, third))[-len(PROCESSING_STEPS):] == PROCESSING_STEPS
     assert one(pg.engine, "SELECT count(*) AS n FROM raw_detections WHERE needs_processing").n == 0
 
 
-def test_one_changed_field_is_one_modified_row(pg, settings, firms):
+def test_one_changed_field_is_one_modified_row(boot, settings, firms):
+    pg = boot
     clock = FakeClock()
     s = make_scheduler(pg.engine, settings, clock, firms)
     s.startup()
     [first] = s.tick()
-    with pg.engine.begin() as c:
-        c.execute(text("UPDATE raw_detections SET needs_processing = false"))
+    assert one(pg.engine, "SELECT count(*) AS n FROM raw_detections WHERE needs_processing").n == 0
     before = one(pg.engine, "SELECT content_hash FROM raw_detections WHERE source = 'MODIS_NRT' "
                             "AND acq_date_raw = '2026-11-14' AND acq_time_raw = '1050'").content_hash
     row = next(r for r in firms.tables["MODIS_NRT"] if r["acq_date"] == "2026-11-14" and r["acq_time"] == "1050")
@@ -278,7 +308,7 @@ def test_one_changed_field_is_one_modified_row(pg, settings, firms):
     assert len(changed) == 1
     d = changed[0]
     assert (d.source, d.acq_time_raw, d.confidence, d.delivered["confidence"]) == ("MODIS_NRT", "1050", "95", "95")
-    assert d.needs_processing and d.content_hash != before
+    assert not d.needs_processing and d.content_hash != before  # processed and published by this job
     others = rows(pg.engine, "SELECT * FROM raw_detections WHERE id <> :id", id=d.id)
     assert all(o.changed_in_job_id == first and not o.needs_processing for o in others)
 
@@ -317,7 +347,8 @@ def test_a_failing_source_fails_the_job_but_keeps_the_others(pg, settings, firms
         "MODIS_NRT", "VIIRS_NOAA20_NRT"}
 
 
-def test_missing_map_key_fails_the_job_and_the_scheduler_continues(pg, settings, firms):
+def test_missing_map_key_fails_the_job_and_the_scheduler_continues(boot, settings, firms):
+    pg = boot
     clock = FakeClock()
     s = make_scheduler(pg.engine, replace(settings, firms_map_key=None), clock, firms)
     s.startup()
@@ -464,8 +495,9 @@ def test_active_job_row_blocks_the_claim_until_its_lease_expires(pg, settings):
     assert job(pg.engine, ghost).status == "abandoned" and job(pg.engine, new).status == "no_change"
 
 
-def test_killed_worker_is_abandoned_and_a_restarted_worker_recovers(pg, settings, firms):
+def test_killed_worker_is_abandoned_and_a_restarted_worker_recovers(boot, settings, firms):
     """I5: a worker dies mid-job (no heartbeat, session gone); the next tick of a new worker recovers."""
+    pg = boot
     clock = FakeClock()
     dead_engine = pg.new_engine()
     dead = make_scheduler(dead_engine, settings, clock, firms, worker_id="host:111")
