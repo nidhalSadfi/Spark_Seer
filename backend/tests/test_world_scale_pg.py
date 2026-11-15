@@ -262,3 +262,162 @@ def test_world_bench_helpers_cover_the_month(world):
         lo, hi, n = c.execute(text("SELECT min(acq_date), max(acq_date), count(*) FROM raw_detections")).one()
     assert (lo, hi) == (date(2026, 10, 1), date(2026, 11, 30)) and n > 59_000
     assert hi - lo <= timedelta(days=60)
+
+
+# -- bootstrap at world scale -----------------------------------------------------------------------
+
+def world_parquet(folder, rows=40_000, seed=9, days=True):
+    """A synthetic world harmonized.parquet (world_bench.history_parquet) with day columns and its
+    validation and fit files; returns the bootstrap keyword arguments."""
+    import json
+
+    from processing.inter_viirs import FIT_KIND
+
+    folder.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    path = folder / "harmonized.parquet"
+    df = world_bench.history_parquet(rng, path, world_bench.world_cells(rng, 800), rows)
+    if days:
+        df["MODIS_days"] = np.minimum(df.MODIS, 28).astype(float)
+        df["VIIRS_days"] = np.minimum(df.VIIRS, 28).astype(float)
+    df.loc[df.index[:3], "harmonized"] = [0.1 + 0.2, 1 / 3, 2.0 ** -30]  # long binary expansions survive
+    df.to_parquet(path, index=False)
+    (folder / "harmonized_validation.json").write_text(json.dumps({"error_pct_cell_month_ratio": 11.5,
+                                                                    "synthetic": True}))
+    fit = folder / "inter_viirs_fit.json"
+    fit.write_text(json.dumps({"kind": FIT_KIND, "approved_r": 0.983, "r_global": 0.983}))
+    return {"parquet": path, "validation": folder / "harmonized_validation.json", "inter_viirs": fit, "mask": None}
+
+
+def db_cell_month(engine) -> list[dict]:
+    with engine.connect() as c:
+        return [dict(r) for r in c.execute(text(
+            f"SELECT {', '.join(store.CELL_COLUMNS)}, dataset_version_id FROM cell_month "
+            "ORDER BY cy, cx, year, month")).mappings()]
+
+
+def ref_calibration_k(c, cal_id):
+    """worker/store.py's k-table read at 538aa86 (SQLAlchemy rows)."""
+    return pd.DataFrame(c.execute(text("SELECT cy, cx, month, k, support FROM calibration_k "
+                                       "WHERE calibration_version_id = :id ORDER BY cy, cx, month"),
+                                  {"id": cal_id}).all(), columns=["cy", "cx", "month", "k", "support"])
+
+
+@pytest.mark.parametrize("days", [True, False])
+def test_parquet_frame_equals_parquet_rows(tmp_path, days):
+    from worker.bootstrap import parquet_frame, parquet_rows
+
+    args = world_parquet(tmp_path, rows=20_000, days=days)
+    df = pd.read_parquet(args["parquet"])
+    ref = parquet_rows(df, 7)
+    new = [{k: (None if v is pd.NA else v) for k, v in r.items()} for r in parquet_frame(df, 7).to_dict("records")]
+    for r in new:
+        r["quality_flags"] = [] if r["quality_flags"] == "{}" else r["quality_flags"]
+    assert len(new) == len(ref) == len(df)
+    for a, b in zip(new, ref):
+        assert a.keys() == b.keys()
+        for k in a:
+            assert (a[k] is None) == (b[k] is None) and (a[k] is None or a[k] == b[k]), (k, a, b)
+            if isinstance(b[k], float):
+                assert float_bits([a[k]]) == float_bits([b[k]])
+
+
+def test_bootstrap_by_copy_stores_exactly_the_row_mapping(pg, tmp_path):
+    from worker.bootstrap import bootstrap, parquet_rows
+
+    args = world_parquet(tmp_path / "w")
+    res = bootstrap(pg.engine, **args, now=NOW)
+    assert res.created and res.rows == 40_000
+    df = pd.read_parquet(args["parquet"]).sort_values(["cy", "cx", "year", "month"], ignore_index=True)
+    expected = [{**r, "dataset_version_id": res.dataset_version_id} for r in parquet_rows(df, res.calibration_version_id)]
+    got = db_cell_month(pg.engine)
+    assert len(got) == len(expected)
+    for a, b in zip(got, expected):
+        assert a == b, (a, b)
+        assert float_bits([a["harmonized"], a["k"], a["support"]]) == float_bits([b["harmonized"], b["k"], b["support"]])
+    with pg.engine.connect() as c:
+        cv = store.load_approved_calibration(c)  # the stored fingerprint matches the COPY read back
+        ref = Calibration(version=str(cv.id), k_table=ref_calibration_k(c, cv.id), k_month=cv.calibration.k_month,
+                          snpp_end=cv.calibration.snpp_end, r=cv.calibration.r, r_global=cv.calibration.r_global)
+    assert ref.fingerprint == cv.calibration.fingerprint
+    pd.testing.assert_frame_equal(cv.calibration.k_table, ref.k_table, check_exact=True)
+    assert len(cv.calibration.k_table) == len(df.drop_duplicates(["cy", "cx", "month"]))
+
+
+def table_rows(engine, table, order):
+    with engine.connect() as c:
+        return [tuple(r) for r in c.execute(text(f"SELECT * FROM {table} ORDER BY {order}")).all()]
+
+
+def test_bootstrap_replace_supersedes_in_one_transaction(pg, tmp_path, monkeypatch):
+    from worker import bootstrap as boot
+
+    first = boot.bootstrap(pg.engine, **world_parquet(tmp_path / "a", rows=5_000, seed=1), now=NOW)
+    old_rows = db_cell_month(pg.engine)
+    new_args = world_parquet(tmp_path / "b", rows=7_000, seed=2)
+    # Without replace: nothing done (the refusal is unchanged).
+    again = boot.bootstrap(pg.engine, **new_args, now=NOW)
+    assert not again.created and "already bootstrapped" in again.message
+
+    # A failure in the middle (after the history copy and the delete) leaves everything as it was.
+    tables = {"cell_month": "cy, cx, year, month", "cell_month_history": "id", "dataset_versions": "id",
+              "calibration_versions": "id", "calibration_k": "calibration_version_id, cy, cx, month"}
+    before = {t: table_rows(pg.engine, t, o) for t, o in tables.items()}
+
+    def boom(*a, **kw):
+        raise RuntimeError("simulated crash during the reload")
+    monkeypatch.setattr(store, "copy_cell_month", boom)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        boot.bootstrap(pg.engine, **new_args, now=NOW, replace=True)
+    assert {t: table_rows(pg.engine, t, o) for t, o in tables.items()} == before
+    monkeypatch.undo()
+
+    res = boot.bootstrap(pg.engine, **new_args, now=NOW + timedelta(hours=1), replace=True)
+    # (the failed attempt used up id 2 of each sequence)
+    cid, did = res.calibration_version_id, res.dataset_version_id
+    assert res.created and cid > 1 and did > 1 and res.rows == 7_000
+    assert "replaced calibration version 1 and dataset version 1" in res.message
+    with pg.engine.connect() as c:
+        ds = c.execute(text("SELECT id, parent_id, status, calibration_version_id, summary FROM dataset_versions "
+                            "ORDER BY id")).all()
+        cal = c.execute(text("SELECT id, status, label, validation_report FROM calibration_versions ORDER BY id")).all()
+        hist = c.execute(text("SELECT count(*), min(replaced_by_version), max(replaced_by_version), "
+                              "min(dataset_version_id) FROM cell_month_history")).one()
+        cv = store.load_approved_calibration(c)
+    assert [(d.id, d.parent_id, d.status, d.calibration_version_id) for d in ds] == \
+        [(1, None, "superseded", 1), (did, 1, "approved", cid)]
+    assert ds[1].summary["source"] == "bootstrap_replace" and ds[1].summary["replaces_dataset_version"] == 1
+    assert [(c_.id, c_.status, c_.label) for c_ in cal] == [(1, "superseded", "bootstrap"),
+                                                           (cid, "approved", "bootstrap-replace")]
+    assert cal[1].validation_report["replaces_calibration_version"] == 1 and cv.id == cid
+    assert tuple(hist) == (len(old_rows), did, did, first.dataset_version_id)  # the old rows, kept for rollback
+    new = db_cell_month(pg.engine)
+    assert len(new) == 7_000 and {r["dataset_version_id"] for r in new} == {did}
+    assert {r["calibration_version_id"] for r in new} == {cid}
+    with pg.engine.connect() as c:  # the old calibration's k table is still there (never deleted)
+        assert c.scalar(text("SELECT count(*) FROM calibration_k WHERE calibration_version_id = 1")) > 0
+
+
+def test_bootstrap_cli_takes_world_paths_and_replace(pg, tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    from sqlalchemy.engine import make_url
+
+    a, b = world_parquet(tmp_path / "a", rows=2_000, seed=4), world_parquet(tmp_path / "b", rows=3_000, seed=5)
+    url = make_url(pg.url).update_query_dict({"options": f"-csearch_path={pg.schema}"})
+    env = {k: v for k, v in os.environ.items() if k != "STATIC_MASK_FILE"}
+    env["DATABASE_URL"] = url.render_as_string(hide_password=False)  # the test schema, never the real database
+
+    def run(args, *extra):
+        cmd = [sys.executable, "-m", "worker.bootstrap", "--data", str(args["parquet"]), "--validation",
+               str(args["validation"]), "--inter-viirs", str(args["inter_viirs"]), *extra]
+        r = subprocess.run(cmd, cwd=world_bench.BACKEND, env=env, capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout + r.stderr
+
+    assert "bootstrapped calibration version 1 and dataset version 1 (2000 cell-months)" in run(a)
+    assert "already bootstrapped" in run(b)
+    assert "with calibration version 2 and dataset version 2 (3000 cell-months" in run(b, "--replace")
+    assert len(db_cell_month(pg.engine)) == 3_000
