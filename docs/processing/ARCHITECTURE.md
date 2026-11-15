@@ -436,3 +436,36 @@ there with a one-line comment.
   The neighbour files used for the r pool are not stored in the repo; the README gives the
   `firms_tool archive` command that downloads them. A live FIRMS `data_availability` check confirmed that S-NPP NRT ends on 2026-11-02. Tests
   still use synthetic data only.
+
+## 16. World coverage (decision 2026-11-15)
+
+The user chose to expand from Tunisia + Algeria to the whole world. Rules:
+
+- **History.** FIRMS SP archives for the world: MODIS C6.1 2001-2025, S-NPP 2012-2025 and
+  NOAA-20 2018-2025 (for r), under `backend/data/world/` (gitignored, never committed). The world
+  historical dataset is built with the **same filter rules as the live processing** (§5), so history
+  and live runs are comparable: no 34°N cut, the static-source mask instead (a world mask built from
+  the world archive), and no country clip (`COUNTRY_BOUNDARY_FILE` unset; the mask handles
+  persistent offshore and industrial sources).
+- **Calibration.** k per cell and calendar month from the world archive, as today. r is fitted
+  world-wide on the S-NPP / NOAA-20 overlap and approved only if it beats r = 1 on held-out years
+  (§5 rule), with the validation reported **per continent and per latitude band** as well as
+  globally, because global totals hide regional errors. Regions where the harmonization error is
+  high are listed in the validation report and shown as such, never hidden.
+- **Live polling.** `FIRMS_BBOX=world` is allowed. About 290 FIRMS transactions per 2-day poll of 4
+  sources (limit 5000 per 10 minutes). The first world poll's backfill is capped by
+  `FIRMS_MAX_BACKFILL_DAYS`.
+- **Processing at scale.** A 3-hourly run may touch every active cell of the current month
+  worldwide (millions of detections by month end). The run must stay within a documented memory
+  and time budget on this machine (30 GB RAM, 8 cores): heavy counting may move to SQL or chunked
+  pandas, but the numbers must stay equal to the existing pure-Python stages (oracle tests).
+- **API.** `/calendar` already takes any bbox. `/fires/live` caps its payload: above a detection
+  limit (or for a bbox wider than a threshold) it returns a 0.25° or 0.5° aggregated grid
+  (`{"mode": "grid", "cells": [{lat, lon, count, frp_sum, ...}]}`) instead of individual
+  detections, with `mode: "detections"` otherwise (additive; the current shape is
+  `mode: "detections"`). `/areas` gains world fire regions next to the four North Africa areas.
+- **Frontend.** The map defaults to the world, queries `/fires/live` for the visible viewport, and
+  renders the grid mode when zoomed out. Area pickers list the world regions.
+- **Cut-over.** Bootstrapping the real database with the world dataset replaces the approved North
+  Africa dataset, so it needs the user's approval and is done by the architect, after the world
+  data and the scaled backend are verified.
