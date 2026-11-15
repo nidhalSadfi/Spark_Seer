@@ -87,7 +87,7 @@ or removed, only added to. All example values below are synthetic or illustrativ
 | `GET /calendar` | Monthly harmonized burning-activity calendar for a bbox or an area |
 | `GET /validation` | Held-out validation report of the MODIS->VIIRS harmonization |
 | `POST /investigate` | Evidence Passport for one area and month (`api/passport.py`, teammate) |
-| `GET /weather?area=<id>` | 3-day Open-Meteo weather context plus historical context (`api/weather.py`, teammate) |
+| `GET /weather?area=<id>` or `?lat=&lon=` | 3-day Open-Meteo weather context plus historical context, for a named area or any point (`api/weather.py`, teammate) |
 
 ### `GET /health`
 
