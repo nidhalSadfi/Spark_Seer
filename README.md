@@ -186,7 +186,8 @@ No parameters. Read from `data/areas.json`, the data person's demo boxes
 | `end` | no | `2025` | last year (inclusive) |
 
 It returns 400 when neither or both of `bbox` and `area` are given, when the area id is unknown,
-or when the bbox is malformed. Examples: `/calendar?area=bizerte&start=2003&end=2025`,
+or when the bbox is malformed (also minLon > maxLon or minLat > maxLat: send a box across the
+antimeridian as two boxes). Examples: `/calendar?area=bizerte&start=2003&end=2025`,
 `/calendar?bbox=8.0,35.0,11.0,37.5`. Below: `/calendar?area=kabylie`, one month shown (August 2021,
 the Kabylie fires).
 

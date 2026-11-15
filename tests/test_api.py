@@ -63,7 +63,8 @@ def test_calendar_by_area_matches_bbox(client):
 
 
 def test_calendar_400s(client):
-    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d"]:
+    for query in ["", "?area=atlantis", f"?bbox={BIZERTE}&area=bizerte", "?bbox=1,2,3", "?bbox=a,b,c,d",
+                  "?bbox=170,-50,-170,-40", "?bbox=0,10,10,0", "?bbox=nan,0,1,1"]:  # across 180, swapped, NaN
         assert client.get("/calendar" + query).status_code == 400, query
 
 

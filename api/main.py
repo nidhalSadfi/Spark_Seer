@@ -107,4 +107,7 @@ def calendar(bbox: str | None = None, area: str | None = None, start: int = 2001
         x0, y0, x1, y1 = map(float, bbox.split(","))
     except ValueError:
         raise HTTPException(400, "bbox must be minLon,minLat,maxLon,maxLat")
+    if not (x0 <= x1 and y0 <= y1):  # also catches NaN; such a box would silently select nothing
+        raise HTTPException(400, "bbox needs minLon <= maxLon and minLat <= maxLat; "
+                                 "a box across the antimeridian (180 degrees) must be sent as two boxes")
     return core.calendar_for_bbox((x0, y0, x1, y1), start, end)
