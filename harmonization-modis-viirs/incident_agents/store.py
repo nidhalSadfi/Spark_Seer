@@ -73,7 +73,8 @@ class Store:
 
     # Columns added after the first release; ALTER keeps existing databases working.
     _ADDED = {"tickets": {"mode": "TEXT NOT NULL DEFAULT 'live'", "history": "TEXT"},
-              "runs": {"mode": "TEXT NOT NULL DEFAULT 'live'"}}
+              "runs": {"mode": "TEXT NOT NULL DEFAULT 'live'"},
+              "ticket_sources": {"precision": "TEXT"}}
 
     def _migrate(self) -> None:
         for table, cols in self._ADDED.items():

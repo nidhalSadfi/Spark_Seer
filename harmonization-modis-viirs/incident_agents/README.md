@@ -67,19 +67,34 @@ A broad keyword search over a past window only reaches its last few hours: sourc
 
 1. It lists the significant fires Kanari archived in the zones. It keeps those inside a zone box and checks their country with a reverse geocode, because Kanari tagged Zaragoza and Bilbao as FR. Flares are dropped. Fires with witness posts or press come first, then the largest, up to 6 (`REPLAY_MAX_FIRES`).
 2. Each fire becomes a satellite ticket. Its place name is searched on Bluesky and X, from 6 h before to 24 h after Kanari first saw it.
+   - Kanari writes names in Latin script, so the OpenStreetMap spellings in the country's languages are searched too, for example Mateur → ماطر and El Tarf → الطارف.
+   - A relevant post found by a fire's own name search joins that fire's ticket when it names the place, even if the geocoder can't resolve its spelling.
 3. The posts go through the same judge, locator and merge steps as a live run. The satellite check uses the archive plus FIRMS. FIRMS uses standard processing where it exists, NRT after it, and adds S-NPP before 2 Nov 2026.
 
-Replay runs and tickets are marked `mode = replay`. They show a Replay badge and never merge with live tickets. Schedules are live only. The lead times describe fires that Kanari saw, so they cannot show how often posts come with no satellite detection at all.
+Replay runs and tickets are marked `mode = replay`. They show a Replay badge and never merge with live tickets. Schedules are live only.
+
+**What counts for lead time:**
+- **Only posts about one specific place start the clock.** Region-level mentions and news items stay on the ticket but are not timed. In the first Algeria replay, a provincial roundup ("69 fires in 13 provinces") would otherwise have read as posts arriving 6 hours before the satellites.
+- **Satellite detections more than 6 h before the first post are ignored,** because they are more likely another fire.
+- **When a post search hits its page limit,** earlier posts may exist. The lead is then marked as a lower bound.
+- **Replay leads only cover fires that Kanari saw,** so they cannot show how often posts come with no satellite detection at all.
 
 ## Checked live on 15 Nov 2026 (replay)
 
 `replay "France" --from 2026-08-26 --to 2026-08-29 --max-fires 5`:
 - **Seeds:** 5 of 12 archived fires in France were replayed. All 5 tickets got "Satellite overlap" and a 25-year history.
 - **Posts:** 42 found, 37 kept, 28 judged as current fire reports.
-- **Calenzana (Corsica):** the first X post ("Un feu de végétation est signalé à Calenzana") came **47 min before** Kanari's first detection. Nearby FIRMS passes had no match.
-- **Magescq (Landes):** the satellites were first, Kanari by 26 min and a FIRMS pass by 38 min.
-- **Two tickets is too few for a general claim.** Kanari's first detection is usually Meteosat MTG, a geostationary satellite imaging every 10 minutes, which is hard for posts to beat.
+- **Calenzana (Corsica):** the first X post ("Un feu de végétation est signalé à Calenzana") came **47 min before** Kanari's first detection. Nearby FIRMS passes had no match. The X page was full, so this is a lower bound.
+- **Magescq (Landes):** the satellites were first, Kanari by 26 min and a NOAA-20/21 pass by 38 min.
 - **Satellite-only seeds can be industrial heat.** Fos-sur-Mer is an industrial port, so a seed there may not be a vegetation fire.
+
+`replay "Tunisie et Algérie" --from 2026-08-24 --to 2026-08-30 --max-fires 6`:
+- **A Tunisia-only replay with Latin names found 0 posts.** With Arabic names added, the Tunisia and Algeria replay found 68 posts and kept 40. All of them came from the El Milia and Constantine fires in Algeria.
+- **Constantine (Djebel Chettaba):** an X post came **76 min before** Kanari's first detection and **141 min before** the first FIRMS pass.
+- **A later Constantine smoke photo:** the satellites were first, Kanari by 120 min and FIRMS by 55 min.
+- **The Tunisian fires had no posts on X or Bluesky.** Djebel Abiod was searched in Latin and Arabic. Mateur was searched only in Latin, before the Arabic names were added. Local reporting is probably mostly on Facebook, which we can't search.
+
+**Across both replays,** 4 tickets have a lead time. Posts came first in 2 of them (Calenzana, Constantine), and the satellites in the other 2. That's too few for a general claim. Kanari's first detection is usually Meteosat MTG, a geostationary satellite imaging every 10 minutes, which is hard for posts to beat.
 
 ## Checked live on 14 Nov 2026
 

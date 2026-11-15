@@ -119,7 +119,8 @@ function leadLine(t) {
   const parts = [];
   if (l.minutes_vs_kanari != null) parts.push(`vs Kanari first detection: <b>${esc(signed(l.minutes_vs_kanari))}</b>`);
   if (l.minutes_vs_polar != null) parts.push(`vs first FIRMS pass: <b>${esc(signed(l.minutes_vs_polar))}</b>`);
-  return `<div class="extra">Lead time (first post ${esc(l.social_first)}): ${parts.join(" · ")}</div>`;
+  const cut = l.posts_truncated ? ' <span class="meta">(post search hit its page limit: people may have posted even earlier)</span>' : "";
+  return `<div class="extra">Lead time (first post ${esc(l.social_first)}): ${parts.join(" · ")}${cut}</div>`;
 }
 function historyLine(t) {
   return t.history ? `<div class="extra">History: ${esc(t.history.text)} <span class="meta">cell ${esc(t.history.cell_id)}</span></div>` : "";

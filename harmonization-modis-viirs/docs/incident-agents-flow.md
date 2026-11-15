@@ -245,7 +245,7 @@ A failing source writes an `error` event for that source, and the run continues 
 | `store.py` | SQLite (WAL) tables and queries |
 | `scheduler.py` | Background thread that runs due schedules |
 | `server.py` + `static/index.html` | FastAPI endpoints, the event stream and the page |
-| `../tests/test_incident_agents.py` | 26 offline tests with fake model and sources |
+| `../tests/test_incident_agents.py` | 27 offline tests with fake model and sources |
 
 ## 9. Not done yet
 
@@ -292,11 +292,23 @@ For each ticket with at least one post and one satellite match, the code compute
 | `polar_first` | First FIRMS polar-orbit detection (VIIRS or MODIS, a few passes a day) |
 | `minutes_vs_kanari`, `minutes_vs_polar` | Satellite time minus post time. **Positive means people posted first.** |
 
-Each run reports, for each clock, the number of tickets, the median and how many tickets had posts first or satellite first. First replay, France 26–29 Aug 2026:
-- **Calenzana:** posts came 47 min before Kanari's first detection.
-- **Magescq:** the satellites were first, Kanari by 26 min and FIRMS by 38 min.
+Rules:
+- **Only a post about one specific place starts the clock.** Region-level mentions and news roundups are not timed.
+- **Detections more than 6 h before the first post are ignored.**
+- **A post search that hit its page limit** marks the lead as a lower bound.
 
-Two tickets isn't enough to generalize. A geostationary satellite is hard to beat, so the stronger claim may be against polar passes, or for fires Kanari never flagged.
+Each run reports, for each clock, the number of tickets, the median and how many tickets had posts first or satellite first. The first replays:
+
+| Fire | vs Kanari first detection | vs first FIRMS pass |
+|---|---|---|
+| Calenzana, Corsica, 27 Aug | posts **47 min** earlier (lower bound) | no FIRMS match |
+| Magescq, Landes, 28 Aug | satellite 26 min earlier | satellite 38 min earlier |
+| Constantine (Djebel Chettaba), Algeria, 25 Aug | posts **76 min** earlier | posts **141 min** earlier |
+| Constantine smoke photo, 26 Aug | satellite 120 min earlier | satellite 55 min earlier |
+
+Four tickets isn't enough to generalize. A geostationary satellite is hard to beat, so the stronger claim may be against polar passes, or for fires Kanari never flagged.
+
+In Tunisia and Algeria, posts are often in Arabic while Kanari names places in Latin script. A replay therefore also searches the OpenStreetMap spelling in the country's languages, for example Mateur → ماطر.
 
 ### 25-year cell history
 

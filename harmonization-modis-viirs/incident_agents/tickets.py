@@ -101,10 +101,10 @@ def upsert(store: Store, loc: Located, run_id: int, open_tickets: list[dict],
                 (*sets.values(), tid))
         t.update(sets)
     store.x("INSERT OR IGNORE INTO ticket_sources(ticket_id, source, kind, url, author, published_at, fetched_at, "
-            "excerpt, place_phrase, judge) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "excerpt, place_phrase, judge, precision) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (tid, loc.rec.source, loc.rec.kind, loc.rec.url, loc.rec.author, loc.rec.published_at,
              loc.rec.fetched_at, (loc.rec.text or "")[:280], loc.verdict.get("place_phrase") or loc.rec.place,
-             json.dumps(loc.verdict, ensure_ascii=False)))
+             json.dumps(loc.verdict, ensure_ascii=False), loc.precision))
     return tid, created
 
 
@@ -154,6 +154,29 @@ def satellite_check(store: Store, ticket_id: int, kanari, firms, hours: int, rep
 
 
 SOCIAL_KINDS = ("post", "news", "verified_signal")
+LEAD_LOOKBACK_H = 6  # same as the replay search window before a fire's first detection
+
+
+def _counts_for_lead(row: dict) -> bool:
+    """Only a post about this one place can start the clock: region-level mentions and news items
+    (often roundups such as "69 fires in 13 provinces") are kept on the ticket but not timed."""
+    if row.get("precision") == "region":
+        return False
+    try:
+        cat = json.loads(row.get("judge") or "{}").get("category")
+    except ValueError:
+        cat = None
+    return cat != "news_about_fire"
+
+
+def mark_truncated(store: Store, ticket_id: int) -> None:
+    """The post search for this ticket hit a page limit, so earlier posts may exist: the lead
+    against satellites is a lower bound (people may have posted even earlier)."""
+    r = store.q("SELECT satellite FROM tickets WHERE id=?", (ticket_id,))
+    sat = json.loads(r[0]["satellite"]) if r and r[0]["satellite"] else None
+    if sat and sat.get("lead"):
+        sat["lead"]["posts_truncated"] = True
+        store.x("UPDATE tickets SET satellite=? WHERE id=?", (json.dumps(sat, ensure_ascii=False), ticket_id))
 
 
 def _iso(d: datetime | None) -> str | None:
@@ -175,17 +198,21 @@ def _minutes(sat: datetime | None, social: datetime | None) -> int | None:
 
 def lead_times(store: Store, ticket_id: int, matches: list[dict]) -> dict | None:
     """Signed minutes from the first public post to the first satellite detection (positive: post first)."""
-    rows = store.q("SELECT published_at FROM ticket_sources WHERE ticket_id=? AND kind IN (?,?,?) "
-                   "AND published_at IS NOT NULL ORDER BY published_at LIMIT 1", (ticket_id, *SOCIAL_KINDS))
-    social = parse_iso(rows[0]["published_at"]) if rows else None
+    rows = store.q("SELECT published_at, url, source, judge, precision FROM ticket_sources WHERE ticket_id=? "
+                   "AND kind IN (?,?,?) AND published_at IS NOT NULL ORDER BY published_at", (ticket_id, *SOCIAL_KINDS))
+    first = next((r for r in rows if _counts_for_lead(r)), None)
+    social = parse_iso(first["published_at"]) if first else None
     if social is None:
         return None
-    k = [d for d in (parse_iso(m.get("first_seen")) for m in matches if m["source"] == "kanari") if d]
-    f = [d for d in (parse_iso(m.get("first_seen")) for m in matches if m["source"] == "firms") if d]
+    # A detection long before the first post is more likely another fire than this one's start.
+    floor = social - timedelta(hours=LEAD_LOOKBACK_H)
+    k = [d for d in (parse_iso(m.get("first_seen")) for m in matches if m["source"] == "kanari") if d and d >= floor]
+    f = [d for d in (parse_iso(m.get("first_seen")) for m in matches if m["source"] == "firms") if d and d >= floor]
     first_k, first_f = (min(k) if k else None), (min(f) if f else None)
     if not first_k and not first_f:
         return None
-    return {"social_first": _iso(social), "kanari_first": _iso(first_k), "polar_first": _iso(first_f),
+    return {"social_first": _iso(social), "first_post": first["url"], "first_post_source": first["source"],
+            "kanari_first": _iso(first_k), "polar_first": _iso(first_f),
             "minutes_vs_kanari": _minutes(first_k, social), "minutes_vs_polar": _minutes(first_f, social)}
 
 
@@ -202,5 +229,7 @@ def lead_summary(store: Store, ticket_ids: list[int]) -> dict:
             mid = len(vals) // 2
             median = vals[mid] if len(vals) % 2 else round((vals[mid - 1] + vals[mid]) / 2)
             out[key] = {"n": len(vals), "median": median, "posts_first": sum(v > 0 for v in vals),
-                        "satellite_first": sum(v < 0 for v in vals), "min": vals[0], "max": vals[-1]}
+                        "satellite_first": sum(v < 0 for v in vals), "min": vals[0], "max": vals[-1],
+                        "lower_bounds": sum(1 for lead in leads if lead.get(key) is not None
+                                            and lead.get("posts_truncated"))}
     return out

@@ -119,6 +119,34 @@ class Geocoder:
         self._cache[key] = res
         return res
 
+    def local_names(self, name: str, country: str, langs: list[str]) -> list[str]:
+        """Other spellings of a place in the given languages (OSM name:ar, name:fr, ...), e.g.
+        'Mateur' -> 'ماطر'. Used by replay so Arabic posts can match. Paced 1.1 s, cached."""
+        key = ("names", name.lower(), country, tuple(langs))
+        if key in self._cache:
+            return self._cache[key]  # type: ignore[return-value]
+        with self._nom_lock:
+            wait = 1.1 - (time.monotonic() - self._nom_last)
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                r = self.s.get("https://nominatim.openstreetmap.org/search", timeout=30,
+                               params={"q": name, "countrycodes": country.lower(), "format": "jsonv2",
+                                       "limit": 1, "namedetails": 1})
+            except requests.RequestException:
+                return []
+            finally:
+                self._nom_last = time.monotonic()
+        out: list[str] = []
+        if r.ok and r.json():
+            nd = r.json()[0].get("namedetails") or {}
+            for lang in langs:
+                v = (nd.get(f"name:{lang}") or "").strip()
+                if v and _fold(v) != _fold(name) and v not in out:
+                    out.append(v)
+        self._cache[key] = out
+        return out
+
     def country_at(self, lat: float, lon: float) -> str | None:
         """ISO-2 country under a point (Nominatim reverse, paced 1.1 s, cached). None if unknown."""
         key = ("rev", round(lat, 2), round(lon, 2))

@@ -362,12 +362,24 @@ def test_lead_time_signed_minutes_and_summary():
     assert summ["minutes_vs_kanari"]["posts_first"] == 1 and summ["minutes_vs_polar"]["satellite_first"] == 1
 
 
-def test_old_database_gets_new_columns():
+def test_old_database_gets_new_columns(tmp_path):
     import sqlite3
-    path = ":memory:"
+    path = tmp_path / "old.sqlite"
+    old = sqlite3.connect(path)  # the first release's tables, without mode / history
+    old.executescript("""CREATE TABLE tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL, run_id INTEGER, title TEXT, place TEXT, country TEXT, lat REAL, lon REAL,
+        precision TEXT, radius_km REAL, first_seen TEXT, last_seen TEXT, status TEXT NOT NULL, satellite TEXT,
+        category TEXT);
+        CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, query TEXT NOT NULL, schedule_id INTEGER,
+        hours INTEGER NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, plan TEXT,
+        summary TEXT);
+        INSERT INTO tickets(created_at, updated_at, status) VALUES ('t', 't', 'Mentioned');""")
+    old.commit()
+    old.close()
     s = Store(path)
-    cols = {r["name"] for r in s.q("PRAGMA table_info(tickets)")}
-    assert {"mode", "history"} <= cols
+    assert {"mode", "history"} <= {r["name"] for r in s.q("PRAGMA table_info(tickets)")}
+    assert "mode" in {r["name"] for r in s.q("PRAGMA table_info(runs)")}
+    assert s.q("SELECT mode FROM tickets")[0]["mode"] == "live"  # old tickets count as live
 
 
 def test_x_query_with_window_and_place():
@@ -450,3 +462,17 @@ def test_server_replay_needs_both_dates():
     import time
     time.sleep(0.2)
     assert calls == [("France", "2026-08-25", "2026-08-27")]
+
+
+def test_lead_ignores_region_mentions_and_news_roundups():
+    s = Store(":memory:")
+    tid, _ = tickets.upsert(s, located(1, hours_ago=1), 1, [])  # town-level firsthand post, 1 h ago
+    roundup = located(2, hours_ago=5)
+    roundup.verdict = {**roundup.verdict, "category": "news_about_fire"}
+    tickets.upsert(s, roundup, 1, s.recent_tickets("2000-01-01"))
+    vague = located(3, hours_ago=4)
+    vague.precision = "region"
+    tickets.upsert(s, vague, 1, s.recent_tickets("2000-01-01"))
+    sat = {"source": "kanari", "first_seen": iso(NOW - timedelta(minutes=30))}
+    lead = tickets.lead_times(s, tid, [sat])
+    assert lead["first_post"].endswith("/1") and lead["minutes_vs_kanari"] == 30

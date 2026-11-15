@@ -24,7 +24,7 @@ from .sources.gdelt import Gdelt
 from .sources.kanari import ARCHIVE_START, ATTRIBUTION, ArchiveSat, Kanari
 from .sources.twitter import TwitterAPI
 from .store import Store
-from .tickets import Located, lead_summary, satellite_check, upsert
+from .tickets import Located, lead_summary, mark_truncated, satellite_check, upsert
 
 ALL_SOURCES = ("kanari", "bluesky", "x", "gdelt")
 # Saharan gas flares pass satellite vegetation filters; the main project cuts at 34°N for the same reason.
@@ -256,13 +256,15 @@ def make_tickets(located: list[Located], open_tickets: list[dict], store: Store,
 
 
 def check_and_summarize(touched: list[int], sat_source, clients: Clients, opts: Options, store: Store,
-                        report: Reporter, hours: int) -> tuple[dict, dict]:
+                        report: Reporter, hours: int, truncated: set | None = None) -> tuple[dict, dict]:
     """Satellite check (+ cell history) on every touched ticket, then the lead-time summary."""
     caps = config.caps()
     statuses: dict[str, int] = {}
     for i, tid in enumerate(touched):
         firms = clients.firms if (opts.firms_check and i < caps.FIRMS_CHECKS_PER_RUN) else None
         st = satellite_check(store, tid, sat_source, firms, hours, report)
+        if truncated and tid in truncated:
+            mark_truncated(store, tid)
         statuses[st] = statuses.get(st, 0) + 1
         report("satellite", "ok", f"#{tid}: {st}", data={"ticket_id": tid, "status": st})
     with_history = sum(1 for tid in touched if store.q("SELECT history FROM tickets WHERE id=?", (tid,))[0]["history"])
@@ -466,6 +468,8 @@ def replay(query: str, start: str | date, end: str | date, store: Store, clients
         records: list[Record] = []
         located_seeds: list[Located] = []
         x_pages = 0
+        truncated_seeds: set[str] = set()
+        seed_names: dict[str, list[str]] = {}
         fetched = utc_iso(datetime.now(timezone.utc).isoformat())
         for f in seeds:
             place, cc = f.get("place") or "?", f["zone_country"]
@@ -479,50 +483,81 @@ def replay(query: str, start: str | date, end: str | date, store: Store, clients
                          fetched_at=fetched, author="kanari.io", meta={"attribution": ATTRIBUTION})
             located_seeds.append(Located(rec, {"category": "satellite", "place_phrase": place, "country": cc},
                                          place, cc, f["lat"], f["lon"], "cluster", 3.0))
-            found = []
-            if "bluesky" in opts.sources and clients.bluesky.available:
-                try:
-                    found += clients.bluesky.search([place], None, since_iso, caps.BLUESKY_LIMIT_PER_QUERY,
-                                                    until_iso=until_iso)
-                except SourceError as e:
-                    report("fetch", "error", str(e), source="bluesky")
-            if "x" in opts.sources and clients.x.available:
-                if x_pages < max_fires and store.usage_today("x") < caps.TWITTER_PAGES_PER_DAY:
+            # Kanari names places in Latin script; local posts may use another (e.g. Arabic in TN, DZ).
+            from .planner import LANGS_BY_COUNTRY
+            names = [place]
+            if hasattr(clients.geocoder, "local_names"):
+                names += clients.geocoder.local_names(place, cc, LANGS_BY_COUNTRY.get(cc, []))
+            seed_names[rec.url] = names
+            found: list[Record] = []
+            for name in names:
+                if "bluesky" in opts.sources and clients.bluesky.available:
                     try:
-                        recs, pages = clients.x.search(all_terms, None, since_iso, 1, until_iso=until_iso,
-                                                       must=place)
-                        found += recs
-                        x_pages += pages
-                        store.add_usage("x", pages)
+                        bs = clients.bluesky.search([name], None, since_iso, caps.BLUESKY_LIMIT_PER_QUERY,
+                                                    until_iso=until_iso)
+                        found += bs
+                        if len(bs) >= caps.BLUESKY_LIMIT_PER_QUERY:
+                            truncated_seeds.add(rec.url)
                     except SourceError as e:
-                        store.add_usage("x", 1)
-                        report("fetch", "error", str(e), source="x")
-                else:
-                    report("fetch", "skipped", f"{place}: X page cap reached", source="x")
+                        report("fetch", "error", str(e), source="bluesky")
+                if "x" in opts.sources and clients.x.available:
+                    if x_pages < 2 * max_fires and store.usage_today("x") < caps.TWITTER_PAGES_PER_DAY:
+                        try:
+                            recs, pages = clients.x.search(all_terms, None, since_iso, 1, until_iso=until_iso,
+                                                           must=name)
+                            found += recs
+                            if len(recs) >= 20:  # a full page: newest first, so the earliest posts are cut
+                                truncated_seeds.add(rec.url)
+                            x_pages += pages
+                            store.add_usage("x", pages)
+                        except SourceError as e:
+                            store.add_usage("x", 1)
+                            report("fetch", "error", str(e), source="x")
+                    else:
+                        report("fetch", "skipped", f"{name}: X page cap reached", source="x")
             for r in found:
-                r.meta["seed"] = f.get("slug")
+                r.meta["seed"] = rec.url
             records += found
-            report("fetch", "ok", f"{place} ({cc}), {since_iso[:16]} to {until_iso[:16]}: {len(found)} posts",
-                   data={"count": len(found), "seed": f.get("url")})
+            cut = (" (page limit reached: earlier posts may exist, so the lead is a lower bound)"
+                   if rec.url in truncated_seeds else "")
+            report("fetch", "ok", f"{' / '.join(names)} ({cc}), {since_iso[:16]} to {until_iso[:16]}: "
+                   f"{len(found)} posts{cut}", data={"count": len(found), "seed": rec.url, "names": names,
+                                                     "truncated": bool(cut)})
 
         # 3. keep posts naming the place or a search term, dedupe; then the usual judge and locate
         by_url: dict[str, Record] = {}
         for r in records:
             if r.url not in by_url:
                 by_url[r.url] = r
-        places = [f.get("place") for f in seeds if f.get("place")]
+        places = [n for ns in seed_names.values() for n in ns]
         kept = [r for r in by_url.values() if mentions_terms(r.text, all_terms + places)]
         report("filter", "ok", f"kept {len(kept)} of {len(records)} posts (duplicates and posts naming neither "
                f"the place nor a fire word removed)")
         verdicts = judge_records(kept, plan, clients, store, report)
         located = located_seeds + locate_records(kept, verdicts, plan, clients, report)
+        # A relevant post found by a seed's own name search, whose place the geocoder could not resolve
+        # (often a local-script spelling), joins that seed's ticket when it names the place.
+        seed_loc = {l.rec.url: l for l in located_seeds}
+        done = {l.rec.url for l in located}
+        joined = 0
+        for r in kept:
+            v, seed = verdicts.get(r.record_id) or {}, seed_loc.get(r.meta.get("seed"))
+            if (r.url in done or not seed or not v.get("ticketable") or v.get("country") != seed.country
+                    or not mentions_terms(r.text, seed_names.get(seed.rec.url, []))):
+                continue
+            located.append(Located(r, v, seed.place, seed.country, seed.lat, seed.lon, "seed place", 10.0))
+            joined += 1
+        if joined:
+            report("locate", "ok", f"{joined} more posts joined their fire by its searched name")
 
         # 4. tickets (replay only), satellite check against the archive and FIRMS, history, lead
         lo_iso = utc_iso(datetime.combine(start - timedelta(days=2), datetime.min.time(), tzinfo=timezone.utc).isoformat())
         hi_iso = utc_iso(datetime.combine(end + timedelta(days=3), datetime.min.time(), tzinfo=timezone.utc).isoformat())
         open_tickets = store.recent_tickets(lo_iso, mode="replay", until_iso=hi_iso)
         touched, created = make_tickets(located, open_tickets, store, run_id, report, mode="replay")
-        statuses, leads = check_and_summarize(touched, ArchiveSat(all_fires), clients, opts, store, report, 72)
+        cut_ids = {store.url_ticket(u, "replay") for u in truncated_seeds} - {None}
+        statuses, leads = check_and_summarize(touched, ArchiveSat(all_fires), clients, opts, store, report, 72,
+                                              truncated=cut_ids)
 
         summary.update(seeds=len(seeds), posts=len(records), kept=len(kept), tickets_touched=len(touched),
                        tickets_created=created, statuses=statuses, lead=leads, llm_tokens=clients.llm.total_tokens)
