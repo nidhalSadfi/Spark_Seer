@@ -398,6 +398,9 @@ def step_harmonize(world: Path) -> None:
     cols = ["cy", "cx", "year", "month", "MODIS", "VIIRS", "k", "k_month", "support", "harmonized", "source",
             "MODIS_days", "VIIRS_days"]
     h = h[cols].sort_values(KEY_COLS).reset_index(drop=True)
+    # pandas 3 carries attrs through merge/pivot, so counts' split_date (a date) arrives here and parquet cannot
+    # write it as JSON metadata (TypeError: Object of type date is not JSON serializable). Same as counts above.
+    h.attrs.clear()
     h.to_parquet(world / "harmonized.parquet", index=False)
 
     f_sum = json.loads((world / "filter_summary.json").read_text())

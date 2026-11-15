@@ -35,7 +35,9 @@ def family_from_columns(instrument: pd.Series, satellite: pd.Series) -> pd.Serie
          (inst.eq("VIIRS") & sat.isin(NOAA20_SATELLITES)).fillna(False).to_numpy(),
          (inst.eq("VIIRS") & sat.isin(NOAA21_SATELLITES)).fillna(False).to_numpy()],
         ["MODIS", "SNPP", "NOAA20", "NOAA21"], default="")
-    return pd.Series(fam, index=instrument.index).replace("", None).astype(object)
+    # Built as object with real Nones: under pandas 3, .replace("", None) on the default string dtype gives NaN,
+    # which is not None, so callers that test `f is not None` broke (KeyError: nan in raw_from_frame).
+    return pd.Series([f if f else None for f in fam.tolist()], index=instrument.index, dtype=object)
 
 
 def read_firms_csvs(raw_dir) -> pd.DataFrame:

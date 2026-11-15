@@ -154,9 +154,11 @@ def test_build_world_end_to_end(archive, tmp_path, monkeypatch):
     ref = calibrate.harmonize(to_ingest_cells(expected)).sort_values(["cy", "cx", "year", "month"])
     pd.testing.assert_frame_equal(h.drop(columns=["MODIS_days", "VIIRS_days"]).reset_index(drop=True),
                                   ref.reset_index(drop=True), check_dtype=False)
-    assert dict(h.dtypes.astype(str)) == {
+    dtypes = dict(h.dtypes.astype(str))
+    assert dtypes.pop("source") in ("object", "str")  # a text column reads back as "object" (pandas 2) or "str" (pandas 3)
+    assert dtypes == {
         "cy": "int32", "cx": "int32", "year": "int16", "month": "int8", "MODIS": "float64", "VIIRS": "float64",
-        "k": "float64", "k_month": "float64", "support": "float64", "harmonized": "float64", "source": "object",
+        "k": "float64", "k_month": "float64", "support": "float64", "harmonized": "float64",
         "MODIS_days": "int16", "VIIRS_days": "int16"}
     from worker.bootstrap import parquet_rows  # pure function: no database
     rows = parquet_rows(h, calibration_version_id=1)
