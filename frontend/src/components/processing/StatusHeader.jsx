@@ -115,7 +115,7 @@ export default function StatusHeader({ status, now, onOpenJob }) {
           <KindCard key={k.kind} k={k} now={now} onOpenJob={onOpenJob} delay={i * 0.05} />
         ))}
         <Card delay={0.1}>
-          <CardHeader kicker="Published" title="Approved versions" subtitle="What /calendar serves right now" />
+          <CardHeader kicker="Published" title="Approved versions" subtitle="What the calendar shows right now" />
           <Row label="Dataset version">
             {ds ? (
               <>

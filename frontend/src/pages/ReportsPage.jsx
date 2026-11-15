@@ -9,7 +9,6 @@ import ReportMiniMap from '../components/reports/ReportMiniMap'
 import { useActiveFires } from '../hooks/useFireData'
 import { useReports } from '../hooks/useReports'
 import { notifyReportError } from '../components/reports/notifyError'
-import { API_BASE } from '../services/http'
 import { STATUS, fmtLatLon, fmtLocal, observedLabel, satelliteCheck, timeAgo } from '../utils/reports'
 
 const TABS = [
@@ -250,7 +249,7 @@ function ReportReview({ report, feed, feedError, busy, onVerdict, onReopen, onDe
  * coordinates get a weather lookup) or dismisses it as a false alarm.
  */
 export default function ReportsPage() {
-  const { reports, counts, source, fallbackReason, isLoading, error, reviewReport, reopenReport, deleteReport } = useReports()
+  const { reports, counts, source, isLoading, error, reviewReport, reopenReport, deleteReport } = useReports()
   const { data: feed, error: feedError } = useActiveFires()
   const [params] = useSearchParams()
   const [busy, setBusy] = useState(false)
@@ -321,13 +320,12 @@ export default function ReportsPage() {
       <div className="mb-4">
         {source === 'local' ? (
           <Notice icon={HardDrive} title="Saved in this browser only.">
-            The reports server at {API_BASE} is unreachable{fallbackReason ? ` (${fallbackReason.replace(/\.$/, '')})` : ''}, so reports and reviews
-            are kept on this device only: other people and other devices do not see them, and they are not sent to the server when it comes
-            back. This page keeps checking for the server.
+            The shared report list is not available right now, so reports and reviews are kept on this device only: other people and other
+            devices do not see them, and they are not shared later. This page switches back to the shared list as soon as it is available.
           </Notice>
         ) : source === 'api' ? (
           <Notice icon={Inbox} tone="info" title="Shared reports.">
-            Reports are stored on the EmberLedger server, so everyone using it sees them and their reviews. The list refreshes every 30 seconds.
+            Everyone using Spark Seer sees these reports and their reviews. The list refreshes every 30 seconds.
           </Notice>
         ) : null}
       </div>

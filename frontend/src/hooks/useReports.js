@@ -8,7 +8,7 @@ const EMPTY = Object.freeze([])
 /**
  * Community fire reports and the actions on them (see services/reportsStore.js).
  *
- *   reports          newest first; refreshed every 30 s so other people's reports show up
+ *   reports          newest first; refreshed every 30 s so other people's reports show up (every 5 min while the server is unavailable)
  *   source           'api' (shared through the server) | 'local' (this browser only) | undefined (loading)
  *   fallbackReason   why the API was not used, when source is 'local'
  *   addReport / reviewReport / reopenReport / deleteReport
@@ -21,7 +21,10 @@ export function useReports() {
     queryKey: KEY,
     queryFn: loadReports,
     staleTime: 15 * 1000,
-    refetchInterval: 30 * 1000,
+    // Every 30 s while the server answers. While it does not (no database: /reports answers 503) asking that
+    // often only fills the backend's log with 503s, so look every 5 min; the tab regaining focus or a reload
+    // still checks at once, so the page switches back to the server soon after it is up again.
+    refetchInterval: (q) => (q.state.data?.source === 'local' ? 5 * 60 * 1000 : 30 * 1000),
     retry: 1,
   })
   const source = query.data?.source

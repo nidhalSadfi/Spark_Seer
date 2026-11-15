@@ -25,7 +25,7 @@ export class ReportsAuthError extends Error {
     super(
       hadToken
         ? 'The reviewer token was not accepted. Check it with the site administrator and enter it again.'
-        : 'Only reviewers can change reports on this server. Enter the reviewer token to review or delete reports.',
+        : 'Only reviewers can change reports. Enter the reviewer token to review or delete reports.',
     )
     this.name = 'ReportsAuthError'
   }
@@ -33,9 +33,9 @@ export class ReportsAuthError extends Error {
 
 function readable(e, action) {
   if (e instanceof ApiError) {
-    if (e.status === 0) return new Error(`Could not ${action}: the server did not answer. Nothing was changed; try again.`)
-    if (e.status === 404) return new Error(`Could not ${action}: the report no longer exists on the server (someone may have deleted it).`)
-    if (e.status >= 500) return new Error(`Could not ${action}: the server is unavailable (${e.message}). Nothing was changed.`)
+    if (e.status === 0) return new Error(`Could not ${action}: the service did not answer. Nothing was changed; try again.`)
+    if (e.status === 404) return new Error(`Could not ${action}: the report no longer exists (someone may have deleted it).`)
+    if (e.status >= 500) return new Error(`Could not ${action}: the service is unavailable right now. Nothing was changed.`)
     return new Error(`Could not ${action}: ${e.message}`)
   }
   return e
@@ -147,7 +147,7 @@ export async function loadReports() {
     return {
       reports: readLocal().sort((a, b) => b.createdAt - a.createdAt),
       source: 'local',
-      fallbackReason: missing ? 'This API has no /reports endpoint yet.' : e.message,
+      fallbackReason: missing ? 'Shared reports are not available yet.' : e.message,
     }
   }
 }
@@ -163,7 +163,7 @@ export async function createReport(values, source) {
     throw readable(e, 'file the report')
   }
   const report = reportFromApi(created)
-  if (!report) throw new Error('The server saved the report but answered with data this page cannot read. Reload to see it.')
+  if (!report) throw new Error('The report was saved, but this page could not show it. Reload the page to see it.')
   return report
 }
 
@@ -179,7 +179,7 @@ export async function setReportStatus(id, status, source) {
     throw readable(e, status === 'pending' ? 'reopen the report' : 'save the review')
   }
   const report = reportFromApi(updated)
-  if (!report) throw new Error('The server saved the review but answered with data this page cannot read. Reload to see it.')
+  if (!report) throw new Error('The review was saved, but this page could not show it. Reload the page to see it.')
   return report
 }
 

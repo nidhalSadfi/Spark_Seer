@@ -39,7 +39,7 @@ async function request(path, { method = 'GET', params, body, headers } = {}) {
     })
   } catch (e) {
     // A fetch failure is also what the browser reports for a 500 without CORS headers, so keep it generic.
-    throw new ApiError(e.name === 'AbortError' ? 'The API took too long to respond.' : 'No response from the API (server down, or an internal error).', 0)
+    throw new ApiError(e.name === 'AbortError' ? 'The service took too long to answer. Try again in a moment.' : 'The service is not responding right now.', 0)
   } finally {
     clearTimeout(timer)
   }

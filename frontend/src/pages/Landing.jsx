@@ -306,7 +306,7 @@ export default function Landing() {
               Ready to <span className="text-heat">see the fire season?</span>
             </h2>
             <p className="mx-auto mt-4 max-w-lg text-muted">
-              Live data from the EmberLedger API when it is running; clearly labelled sample data when it is not.
+              Live data whenever the service is up; clearly labelled sample data when it is not.
             </p>
             <div className="mt-8">
               <MagneticButton onClick={launch}>Launch dashboard</MagneticButton>
@@ -317,9 +317,7 @@ export default function Landing() {
         <footer className="border-t border-line pb-24 pt-6 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-faint">
           <span className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             {PROJECT.team.logo && <img src={PROJECT.team.logo} alt="" className="size-7 rounded-md object-cover" />}
-            <span>{[PROJECT.name, PROJECT.team.name && `Team ${PROJECT.team.name}`, PROJECT.challenge.event].filter(Boolean).join(' · ')}</span>
-            {PROJECT.challenge.logo && <img src={PROJECT.challenge.logo} alt="" className="h-6 w-auto opacity-80" />}
-          </span>
+            <span>{[PROJECT.name, PROJECT.team.name && `Team ${PROJECT.team.name}`, PROJECT.challenge.event].filter(Boolean).join(' · ')}</span>          </span>
         </footer>
       </main>
 

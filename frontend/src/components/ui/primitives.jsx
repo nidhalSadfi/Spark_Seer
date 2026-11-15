@@ -129,7 +129,19 @@ export function ActionButton({ variant = 'secondary', icon: Icon, children, clas
   )
 }
 
+/** A labelled <select>. Options with a `group` label are shown under that heading (in the order they come). */
 export function Select({ label, value, onChange, options, className = '' }) {
+  const items = []
+  for (const o of options) {
+    const last = items.at(-1)
+    if (o.group && last?.group === o.group) last.options.push(o)
+    else items.push(o.group ? { group: o.group, options: [o] } : o)
+  }
+  const option = (o) => (
+    <option key={o.value} value={o.value}>
+      {o.label}
+    </option>
+  )
   return (
     <label className={`flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-faint ${className}`}>
       {label}
@@ -138,11 +150,15 @@ export function Select({ label, value, onChange, options, className = '' }) {
         onChange={(e) => onChange(e.target.value)}
         className="h-9 rounded-lg border border-line bg-sidebar px-2.5 text-sm font-normal normal-case tracking-normal text-ink hover:border-faint"
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
+        {items.map((it) =>
+          it.options ? (
+            <optgroup key={`g:${it.group}`} label={it.group}>
+              {it.options.map(option)}
+            </optgroup>
+          ) : (
+            option(it)
+          ),
+        )}
       </select>
     </label>
   )

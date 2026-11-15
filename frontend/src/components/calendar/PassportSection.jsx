@@ -19,7 +19,7 @@ function Passport({ p }) {
       <div className="flex flex-wrap items-center gap-2">
         {flag && <Badge tone={flag.tone}>{flag.label}</Badge>}
         {p.ai_checked && p.ai_text && (
-          <Badge tone="info" title="Plain-language wording by an AI model; the API only keeps it when every number matches the passport.">
+          <Badge tone="info" title="Plain-language wording by an AI model, kept only when every number matches the passport.">
             <Sparkles className="size-3" aria-hidden /> AI wording · numbers verified
           </Badge>
         )}

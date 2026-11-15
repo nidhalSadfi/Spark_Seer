@@ -109,7 +109,7 @@ export default function ReportIntel({ report }) {
             {hc.is_critical_month && <Badge tone="fire">Critical fire-season month</Badge>}
           </>
         ) : (
-          'No satellite record around this point: the EmberLedger dataset covers Tunisia and northern Algeria.'
+          'No satellite fire record around this point yet.'
         )}
       </p>
 

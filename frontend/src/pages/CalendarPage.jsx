@@ -45,7 +45,7 @@ export default function CalendarPage() {
               <span className="size-3 rounded-sm border border-line bg-bg" aria-hidden /> Blank = no data, not zero
             </span>
             {sensor === 'harmonized' && (
-              <span className="text-faint">Outlined by the API: robust z-score ≥ 3 vs. the same month in other years</span>
+              <span className="text-faint">Outlined: robust z-score ≥ 3 vs. the same month in other years</span>
             )}
           </p>
           <FireCalendar

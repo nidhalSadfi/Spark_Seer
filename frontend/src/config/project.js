@@ -16,7 +16,6 @@ export const PROJECT = {
     summary:
       'Our answer is a harmonized MODIS + VIIRS burning-activity calendar for Tunisia and northern Algeria: a consistent hotspot record across both sensors, with anomaly flags, a held-out validation of the harmonization, and sourced evidence for any month.',
     url: 'https://www.spaceappschallenge.org/2026/challenges/modis-and-viirs-hot-spots/',
-    logo: '/branding/space-apps-challenge-2026.png',
   },
 
   team: {

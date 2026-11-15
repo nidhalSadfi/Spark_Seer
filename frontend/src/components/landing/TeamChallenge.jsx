@@ -16,17 +16,13 @@ function Ghost({ children }) {
 }
 
 export function ChallengeCard() {
-  const { event, title, summary, url, logo } = PROJECT.challenge
+  const { event, title, summary, url } = PROJECT.challenge
   return (
     <TiltCard max={5} className="h-full">
       <div className="flex items-center gap-3">
-        {logo ? (
-          <img src={logo} alt={`${title || 'Challenge'} logo`} className="h-12 w-auto max-w-[8.5rem] rounded-xl bg-white/5 object-contain p-1.5" />
-        ) : (
-          <span className="grid size-10 place-items-center rounded-xl bg-fire/15 text-fire">
-            <Trophy className="size-5" aria-hidden />
-          </span>
-        )}
+        <span className="grid size-10 place-items-center rounded-xl bg-fire/15 text-fire">
+          <Trophy className="size-5" aria-hidden />
+        </span>
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fire">The challenge</p>
           <p className="text-sm text-muted">{event}</p>

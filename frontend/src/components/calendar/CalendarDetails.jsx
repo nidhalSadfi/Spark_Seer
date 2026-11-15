@@ -125,7 +125,7 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
       </div>
       <p className="text-xs leading-relaxed text-faint">
         {sensor === 'harmonized'
-          ? 'Harmonized = VIIRS-equivalent detections: MODIS × a fitted ratio before 2012, observed VIIRS from 2012. Not directly comparable with raw counts. Flag and z-score come from the API (robust z vs. the same month in other years, |z| ≥ 3).'
+          ? 'Harmonized = VIIRS-equivalent detections: MODIS × a fitted ratio before 2012, observed VIIRS from 2012. Not directly comparable with raw counts. The flag and z-score compare it with the same month in other years (robust z, flagged at |z| ≥ 3).'
           : `Raw ${sensorLabel(sensor)} detections. Not directly comparable with other sensors.`}{' '}
         Baseline: median of this calendar month in all earlier complete years of the record (months without data or
         partial months are left out).

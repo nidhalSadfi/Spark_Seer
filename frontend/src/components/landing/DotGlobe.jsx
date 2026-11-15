@@ -542,13 +542,13 @@ export default function DotGlobe({ className = '' }) {
         {tip && (
           <>
             <p className="font-semibold text-ink">{tip.name}</p>
-            <p className="text-[11px] text-muted">{tip.core ? 'EmberLedger coverage area' : 'Illustrative hotspot cluster'}</p>
+            <p className="text-[11px] text-muted">{tip.core ? 'Study area with a 25-year record' : 'Illustrative hotspot cluster'}</p>
           </>
         )}
       </div>
 
       <p className="sr-only" aria-live="polite">
-        {tip ? `${tip.name}. ${tip.core ? 'EmberLedger coverage area.' : 'Illustrative hotspot cluster.'}` : ''}
+        {tip ? `${tip.name}. ${tip.core ? 'Study area with a 25-year record.' : 'Illustrative hotspot cluster.'}` : ''}
       </p>
 
       <div className="pointer-events-none absolute inset-x-4 bottom-3 flex items-end justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.14em] text-faint">
@@ -557,7 +557,7 @@ export default function DotGlobe({ className = '' }) {
             <span className="size-1.5 rounded-full bg-fire shadow-[0_0_8px_#f97316]" aria-hidden /> Fire hotspot (illustrative)
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full border border-dashed border-fire-low" aria-hidden /> EmberLedger coverage
+            <span className="size-2 rounded-full border border-dashed border-fire-low" aria-hidden /> Study areas
           </span>
         </span>
         <span className="text-right">Drag · click a hotspot</span>

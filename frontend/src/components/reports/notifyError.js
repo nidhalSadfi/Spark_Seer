@@ -15,7 +15,7 @@ export function notifyReportError(e) {
     action: {
       label: getAdminToken() ? 'Change token' : 'Enter token',
       onClick: () => {
-        const token = window.prompt('Reviewer token (sent as X-Admin-Token, kept for this tab only):', '')
+        const token = window.prompt('Reviewer token (kept for this tab only):', '')
         if (token == null) return
         setAdminToken(token)
         toast(token.trim() ? 'Reviewer token saved for this tab. Try again.' : 'Reviewer token cleared.')

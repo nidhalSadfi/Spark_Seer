@@ -246,8 +246,9 @@ export default function JobDrawer({ jobId, onClose }) {
             )}
             {error && (
               <p className="rounded-lg border border-fire/40 bg-fire/10 px-3 py-2 text-sm text-orange-200">
-                {processingUnavailable(error) ? 'The processing database is not connected: ' : 'Could not load this job: '}
-                {error.message}
+                {processingUnavailable(error)
+                  ? 'Processing history is not available right now.'
+                  : 'Could not load this update. Try again in a moment.'}
               </p>
             )}
             {data && <Detail job={data} />}
