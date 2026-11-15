@@ -571,3 +571,45 @@ def test_worker_cli_once_against_postgres(pg):
     [j] = rows(pg.engine, "SELECT * FROM processing_jobs")
     assert (j.kind, j.status, j.lease_owner) == (FIRMS_POLL, "failed", "cli:1") and "FIRMS_MAP_KEY" in j.error
     assert {r.kind for r in rows(pg.engine, "SELECT kind FROM schedules")} == {FIRMS_POLL, MONTHLY_RECONCILE}
+
+
+def test_world_poll_backfill_is_paced_against_the_key_budget(boot, settings, firms):
+    """FIRMS_BBOX=world (spec §16): 36 transactions per day per call; a 30-day first backfill of 3
+    sources is 3240, plus S-NPP's last 18 uncovered days up to its end (648), so the key's budget is
+    checked before the first call and after every BUDGET_CHECK_EVERY transactions. The fetches
+    are stored under bbox "world"."""
+    from worker.firms_poll import BUDGET_CHECK_EVERY
+
+    pg = boot
+    world = replace(settings, firms_bbox="world", firms_max_backfill_days=30, processing_min_lat=None)
+    s = make_scheduler(pg.engine, world, FakeClock(), firms)
+    s.startup()
+    [job_id] = s.tick()
+    assert job(pg.engine, job_id).status == "succeeded"
+    st = steps(pg.engine, job_id)
+    plan = st["planning"].summary
+    assert plan["bbox"] == "world" and plan["estimated_transactions"] == 3 * 30 * 36 + 18 * 36 == 3888
+    assert plan["budget"] == {"tiles": 18, "transaction_limit": 5000, "limit_window_s": 600, "paced": True,
+                              "check_every": BUDGET_CHECK_EVERY}
+    costs = [36 * days for _, _, days in firms.windows]
+    assert sum(costs) == 3888
+    checks, since = 0, None
+    for cost in costs:
+        if since is None or since + cost > BUDGET_CHECK_EVERY:
+            checks, since = checks + 1, 0
+        since += cost
+    assert st["storage"].summary["budget"]["checks"] == firms.status_calls == checks == 5
+    assert all("/world/" in u for u in firms.urls if "/api/area/" in u)
+    assert {f.bbox for f in rows(pg.engine, "SELECT bbox FROM firms_fetches")} == {"world"}
+    assert st["filter"].summary["rules"]["min_lat"] is None
+
+
+def test_normal_world_poll_is_not_paced(boot, settings, firms):
+    pg = boot
+    world = replace(settings, firms_bbox="world")  # 2-day windows: 3 x 72 = 216 transactions
+    s = make_scheduler(pg.engine, world, FakeClock(), firms)
+    s.startup()
+    [job_id] = s.tick()
+    plan = steps(pg.engine, job_id)["planning"].summary
+    assert plan["estimated_transactions"] == 216 and plan["budget"]["paced"] is False
+    assert firms.status_calls == 0

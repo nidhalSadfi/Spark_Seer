@@ -3,7 +3,7 @@
 Rules, applied in this order (a dropped row is counted under the first rule it fails):
   unknown_source       family (from `source`) or product (NRT/SP) cannot be determined
   invalid_coordinates  latitude or longitude missing or not a number
-  south_of_min_lat     latitude < min_lat (34)
+  south_of_min_lat     latitude < min_lat (34; no cut when min_lat is None, the world, spec §16)
   low_confidence       MODIS: numeric confidence < 30 (or not a number);
                        VIIRS: confidence not in {n, h, nominal, high} (trimmed, case-insensitive)
   sp_type_missing      SP row without `type`
@@ -81,7 +81,8 @@ def apply_filters(detections: pd.DataFrame, *, mask: StaticMask | None, boundary
 
     drop(family.isna().to_numpy() | product.isna().to_numpy(), "unknown_source")
     drop(~(np.isfinite(lat.to_numpy()) & np.isfinite(lon.to_numpy())), "invalid_coordinates")
-    drop(~(lat.to_numpy() >= params.min_lat), "south_of_min_lat")
+    if params.min_lat is not None:
+        drop(~(lat.to_numpy() >= params.min_lat), "south_of_min_lat")
     drop(~np.where(is_modis, modis_ok, viirs_ok), "low_confidence")
     drop(is_sp & typ.isna().to_numpy(), "sp_type_missing")
     drop(is_sp & typ.notna().to_numpy() & (typ.to_numpy() != params.sp_keep_type), "sp_type_nonzero")

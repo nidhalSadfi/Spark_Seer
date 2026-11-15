@@ -20,6 +20,12 @@ Bbox = tuple[float, float, float, float]  # (west, south, east, north), degrees
 
 # Spec §1: Tunisia + Algeria north of 34°N padded to 0.5° cells (one 60° FIRMS tile).
 DEFAULT_REGION_BBOX: Bbox = (-2.5, 34.0, 11.5, 38.0)
+# Spec §16: FIRMS_BBOX=world polls the whole globe; the FIRMS area API takes the literal "world".
+WORLD = "world"
+WORLD_EXTENT: Bbox = (-180.0, -90.0, 180.0, 90.0)
+# Spec §5 filter: detections south of this latitude are dropped (the North Africa scope). The world
+# (spec §16) has no latitude cut: PROCESSING_MIN_LAT=none.
+DEFAULT_PROCESSING_MIN_LAT = 34.0
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
@@ -32,7 +38,7 @@ class Settings:
     database_url: str | None = field(default=None, repr=False)  # repr=False: may hold a password
     firms_map_key: str | None = field(default=None, repr=False)
     firms_poll_interval_hours: float = 3.0
-    firms_bbox: Bbox = DEFAULT_REGION_BBOX
+    firms_bbox: Bbox | str = DEFAULT_REGION_BBOX  # a bbox tuple or WORLD
     firms_max_backfill_days: int = 30
     firms_raw_dir: Path = Path("data/raw/firms")
     worker_lease_seconds: float = 300.0
@@ -43,6 +49,8 @@ class Settings:
     static_mask_file: Path | None = None
     drift_warn_pct: float = 40.0
     drift_min_count: float = 50.0
+    # Spec §5 latitude filter; None = no latitude cut (the world, spec §16).
+    processing_min_lat: float | None = DEFAULT_PROCESSING_MIN_LAT
     # Review (spec §7): an empty model list disables the AI review (crewai is then never imported).
     openrouter_api_key: str | None = field(default=None, repr=False)
     openrouter_models: tuple[str, ...] = ()
@@ -59,9 +67,16 @@ class Settings:
     def __post_init__(self) -> None:
         _check(self.firms_poll_interval_hours > 0 and math.isfinite(self.firms_poll_interval_hours),
                "FIRMS_POLL_INTERVAL_HOURS", "must be a number > 0", self.firms_poll_interval_hours)
-        w, s, e, n = self.firms_bbox
-        _check(-180 <= w < e <= 180 and -90 <= s < n <= 90, "FIRMS_BBOX",
-               "must be west,south,east,north with west < east and south < north, in range", self.firms_bbox)
+        if isinstance(self.firms_bbox, str):
+            _check(self.firms_bbox == WORLD, "FIRMS_BBOX", f"must be {WORLD!r} or west,south,east,north",
+                   self.firms_bbox)
+        else:
+            w, s, e, n = self.firms_bbox
+            _check(-180 <= w < e <= 180 and -90 <= s < n <= 90, "FIRMS_BBOX",
+                   "must be west,south,east,north with west < east and south < north, in range", self.firms_bbox)
+        _check(self.processing_min_lat is None or (isinstance(self.processing_min_lat, (int, float))
+                                                    and -90 <= self.processing_min_lat <= 90),
+               "PROCESSING_MIN_LAT", "must be a latitude from -90 to 90 or none", self.processing_min_lat)
         _check(self.firms_max_backfill_days >= 1, "FIRMS_MAX_BACKFILL_DAYS", "must be >= 1",
                self.firms_max_backfill_days)
         _check(self.worker_lease_seconds > 0, "WORKER_LEASE_SECONDS", "must be > 0", self.worker_lease_seconds)
@@ -97,8 +112,17 @@ class Settings:
 
     @property
     def firms_bbox_arg(self) -> str:
-        """The bbox as the FIRMS area API expects it ("w,s,e,n")."""
+        """The bbox as the FIRMS area API expects it ("w,s,e,n", or "world")."""
         return bbox_arg(self.firms_bbox)
+
+    @property
+    def firms_is_world(self) -> bool:
+        return self.firms_bbox == WORLD
+
+    @property
+    def firms_bbox_extent(self) -> Bbox:
+        """(west, south, east, north) of the polled area; the whole globe for FIRMS_BBOX=world."""
+        return WORLD_EXTENT if self.firms_is_world else self.firms_bbox
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -125,6 +149,8 @@ class Settings:
             kw["drift_warn_pct"] = _number("DRIFT_WARN_PCT", v, float)
         if (v := _get("DRIFT_MIN_COUNT")) is not None:
             kw["drift_min_count"] = _number("DRIFT_MIN_COUNT", v, float)
+        if (v := _get("PROCESSING_MIN_LAT")) is not None:
+            kw["processing_min_lat"] = None if v.lower() == "none" else _number("PROCESSING_MIN_LAT", v, float)
         kw["openrouter_api_key"] = _get("OPENROUTER_API_KEY")
         if (v := _get("OPENROUTER_MODELS")) is not None:
             kw["openrouter_models"] = tuple(m.strip() for m in v.split(",") if m.strip())
@@ -195,14 +221,16 @@ def _bool(name: str, raw: str) -> bool:
     return value == "true"
 
 
-def _parse_bbox(raw: str) -> Bbox:
+def _parse_bbox(raw: str) -> Bbox | str:
+    if raw.strip().lower() == WORLD:
+        return WORLD
     parts = [p.strip() for p in raw.split(",")]
     try:
         if len(parts) != 4:
             raise ValueError
         w, s, e, n = (float(p) for p in parts)
     except ValueError:
-        raise SettingsError(f"FIRMS_BBOX must be four numbers west,south,east,north, got {raw!r}") from None
+        raise SettingsError(f"FIRMS_BBOX must be {WORLD!r} or four numbers west,south,east,north, got {raw!r}") from None
     return (w, s, e, n)
 
 

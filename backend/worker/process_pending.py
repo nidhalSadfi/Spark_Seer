@@ -41,8 +41,10 @@ STATUS_FOR = {"approve": "succeeded", "hold": "held", "reject": "rejected"}
 
 
 def params_for(settings) -> ProcessingParams:
-    """The default science with the deployment's drift thresholds (processing/params.py)."""
-    return replace(DEFAULT_PARAMS, drift_warn_pct=settings.drift_warn_pct, drift_min_count=settings.drift_min_count)
+    """The default science with the deployment's drift thresholds and latitude cut (processing/params.py;
+    PROCESSING_MIN_LAT=none for the world, spec §16)."""
+    return replace(DEFAULT_PARAMS, drift_warn_pct=settings.drift_warn_pct, drift_min_count=settings.drift_min_count,
+                   min_lat=settings.processing_min_lat)
 
 
 # ----------------------------------------------------------------------------- inputs

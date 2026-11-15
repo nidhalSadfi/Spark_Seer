@@ -21,7 +21,7 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
-from firms_tool.area_api import Window, call_cost, windows_for
+from firms_tool.area_api import DEFAULT_LIMIT, LIMIT_WINDOW_S, Window, bbox_tiles, call_cost, windows_for
 from firms_tool.sensors import SENSORS, Sensor
 from worker.detections import Detection, parse_csv
 from worker.jobs import JobContext, JobError, describe
@@ -32,6 +32,13 @@ log = logging.getLogger("worker.firms_poll")
 # NRT source per sensor, in catalogue order: MODIS_NRT, VIIRS_SNPP_NRT, VIIRS_NOAA20_NRT, VIIRS_NOAA21_NRT.
 NRT_SOURCES: tuple[tuple[str, Sensor], ...] = tuple((s.api_nrt, s) for s in SENSORS.values())
 COUNT_KEYS = ("fetched", "new", "modified", "unchanged", "malformed", "duplicates")
+# A poll whose estimate exceeds this many transactions (a world poll: 36 per day per call, about 290
+# for a normal 2-day poll of 4 sources, thousands for a backfill) checks the key's budget before its
+# first call and again after every BUDGET_CHECK_EVERY transactions spent, waiting while fewer than the
+# next call's cost plus BUDGET_RESERVE are left (limit: DEFAULT_LIMIT per LIMIT_WINDOW_S). Smaller
+# polls never check; a rate-limited call still waits and retries in Client.fetch_window.
+BUDGET_CHECK_EVERY = 1000
+BUDGET_RESERVE = 100
 
 
 @dataclass(frozen=True)
@@ -107,10 +114,14 @@ def run(ctx: JobContext) -> str:
         watermarks = load_watermarks(ctx.engine, [s for s, _ in NRT_SOURCES])
         plans = [plan_source(s, sensor, today, availability, watermarks.get(s), settings.firms_max_backfill_days)
                  for s, sensor in NRT_SOURCES]
+        estimated = sum(call_cost(w, bbox) for p in plans for w in p.windows)
+        pacing = estimated > BUDGET_CHECK_EVERY
         step.summary.update(
-            today=today, bbox=bbox,
-            estimated_transactions=sum(call_cost(w, bbox) for p in plans for w in p.windows),
+            today=today, bbox=bbox, estimated_transactions=estimated,
+            budget={"tiles": bbox_tiles(bbox), "transaction_limit": DEFAULT_LIMIT, "limit_window_s": LIMIT_WINDOW_S,
+                    "paced": pacing, "check_every": BUDGET_CHECK_EVERY if pacing else None},
             sources={p.source: _describe_plan(p, watermarks.get(p.source), availability) for p in plans})
+    budget = _Budget(client, pacing)
 
     ctx.counts.update(fetched=0, new=0, modified=0, unchanged=0)
     per_source: dict[str, Counter] = {}
@@ -123,6 +134,7 @@ def run(ctx: JobContext) -> str:
             with ctx.step(f"fetch:{plan.source}") as step:
                 step.summary["windows"] = []
                 for w in plan.windows:
+                    budget.before(call_cost(w, bbox))
                     body = client.fetch_window(w, bbox)
                     fetch_id, got = store_response(ctx, w, bbox, body, availability.get(w.source))
                     counts.update(got)
@@ -138,6 +150,8 @@ def run(ctx: JobContext) -> str:
     with ctx.step("storage") as step:
         pending = count_pending(ctx.engine)
         ctx.counts["pending"] = pending
+        if budget.paced:
+            step.summary["budget"] = budget.summary()
         step.summary.update(
             totals={k: sum(c[k] for c in per_source.values()) for k in COUNT_KEYS},
             per_source={s: dict(c) for s, c in per_source.items()}, pending=pending,
@@ -150,6 +164,32 @@ def run(ctx: JobContext) -> str:
     from worker.process_pending import process_pending
 
     return process_pending(ctx, availability)
+
+
+class _Budget:
+    """Proactive pacing of a large poll against the key's transaction budget (see BUDGET_CHECK_EVERY)."""
+
+    def __init__(self, client, paced: bool):
+        self.client, self.paced = client, paced
+        self.since_check: int | None = None
+        self.checks, self.spent, self.check_errors = 0, 0, 0
+        self.last: tuple[int, int] | None = None
+
+    def before(self, cost: int) -> None:
+        if self.paced and (self.since_check is None or self.since_check + cost > BUDGET_CHECK_EVERY):
+            try:
+                self.last = self.client.wait_for_budget(reserve=cost + BUDGET_RESERVE)
+                self.checks += 1
+            except Exception as e:  # the check is advisory: fetch_window still handles a rate limit
+                self.check_errors += 1
+                log.warning("FIRMS key budget check failed (%s); fetching anyway", type(e).__name__)
+            self.since_check = 0
+        self.since_check = (self.since_check or 0) + cost
+        self.spent += cost
+
+    def summary(self) -> dict:
+        return {"checks": self.checks, "check_errors": self.check_errors, "estimated_spent": self.spent,
+                "last_used_limit": list(self.last) if self.last else None}
 
 
 def _describe_plan(plan: SourcePlan, watermark: date | None, availability: dict[str, tuple[date, date]]) -> dict:
