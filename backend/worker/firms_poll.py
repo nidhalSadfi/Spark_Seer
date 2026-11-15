@@ -51,16 +51,13 @@ def plan_source(source: str, sensor: Sensor, today: date, availability: dict[str
     but never more than `max_backfill_days` days back (today included) and never before the
     source's NRT availability min_date.
     """
-    if sensor.coverage_end and today > sensor.coverage_end:
-        reason = f"past catalogue coverage_end {sensor.coverage_end}"
-        if source in availability and availability[source][1] > sensor.coverage_end:
-            reason += f"; data_availability still reports data up to {availability[source][1]}"
-        return SourcePlan(source, skipped=reason)
     if source not in availability:
         return SourcePlan(source, skipped="absent from FIRMS data_availability")
     avail_min, avail_max = availability[source]
     yesterday = today - timedelta(days=1)
     floor = today - timedelta(days=max_backfill_days - 1)
+    if sensor.coverage_end and today > sensor.coverage_end:
+        return _plan_ended_source(source, sensor.coverage_end, avail_min, avail_max, watermark, floor)
     backfill_from = max(watermark or floor, floor, avail_min)
     start = min(yesterday, backfill_from)
     notes = []
@@ -69,6 +66,25 @@ def plan_source(source: str, sensor: Sensor, today: date, availability: dict[str
     if avail_max < yesterday:
         notes.append(f"data_availability max_date {avail_max} is before yesterday; the source may have stalled")
     return SourcePlan(source, tuple(windows_for(source, start, today)), notes=tuple(notes))
+
+
+def _plan_ended_source(source: str, coverage_end: date, avail_min: date, avail_max: date,
+                       watermark: date | None, floor: date) -> SourcePlan:
+    """A source past its catalogue coverage_end (S-NPP after 2026-11-02).
+
+    Its last days are still the harmonization reference for the month they fall in (spec §5), so
+    days up to coverage_end that no stored fetch covers yet are fetched once, within the usual
+    backfill floor and availability. After that the source is skipped.
+    """
+    reason = f"past catalogue coverage_end {coverage_end}"
+    if avail_max > coverage_end:
+        reason += f"; data_availability still reports data up to {avail_max}"
+    end = min(coverage_end, avail_max)
+    start = max(watermark or floor, floor, avail_min)
+    if (watermark is not None and watermark >= end) or start > end:
+        return SourcePlan(source, skipped=reason)
+    return SourcePlan(source, tuple(windows_for(source, start, end)),
+                      notes=(f"{reason}: fetching its last uncovered days {start}..{end}",))
 
 
 def run(ctx: JobContext) -> str:

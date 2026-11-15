@@ -62,12 +62,27 @@ def test_today_and_yesterday_are_always_fetched():
     assert spans(plan_source("MODIS_NRT", MODIS, TODAY, late, None, 30)) == [(YESTERDAY, 2)]
 
 
-def test_source_past_catalogue_coverage_end_is_skipped_with_a_note():
-    plan = plan_source("VIIRS_SNPP_NRT", SNPP, TODAY, AVAIL, None, 30)
+def test_source_past_catalogue_coverage_end_is_skipped_once_fully_fetched():
+    plan = plan_source("VIIRS_SNPP_NRT", SNPP, TODAY, AVAIL, date(2026, 11, 2), 30)
     assert plan.windows == () and "coverage_end 2026-11-02" in plan.skipped
     still_reported = {"VIIRS_SNPP_NRT": (date(2026, 8, 1), TODAY)}
     assert "still reports data up to 2026-11-14" in plan_source(
-        "VIIRS_SNPP_NRT", SNPP, TODAY, still_reported, None, 30).skipped
+        "VIIRS_SNPP_NRT", SNPP, TODAY, still_reported, date(2026, 11, 2), 30).skipped
+    # Its last days are older than the backfill floor: nothing left to fetch.
+    assert plan_source("VIIRS_SNPP_NRT", SNPP, TODAY, AVAIL, None, 5).skipped
+
+
+def test_ended_source_fetches_its_uncovered_last_days_up_to_coverage_end():
+    # Never fetched: from the backfill floor (30 days incl. today = 10-16) to coverage_end, not to today.
+    plan = plan_source("VIIRS_SNPP_NRT", SNPP, TODAY, AVAIL, None, 30)
+    assert plan.skipped is None and covered(plan) == (date(2026, 10, 16), date(2026, 11, 2), 18)
+    assert any("last uncovered days" in n for n in plan.notes)
+    # Partly fetched: from the watermark (refetched, as for live sources) to coverage_end.
+    plan = plan_source("VIIRS_SNPP_NRT", SNPP, TODAY, AVAIL, date(2026, 10, 30), 30)
+    assert covered(plan) == (date(2026, 10, 30), date(2026, 11, 2), 4)
+    # Availability ending before coverage_end caps the tail.
+    early = {"VIIRS_SNPP_NRT": (date(2026, 8, 1), date(2026, 10, 31))}
+    assert covered(plan_source("VIIRS_SNPP_NRT", SNPP, TODAY, early, None, 30))[1] == date(2026, 10, 31)
     # On its last covered day the source is still polled.
     on_last_day = plan_source("VIIRS_SNPP_NRT", SNPP, date(2026, 11, 2), AVAIL, date(2026, 11, 1), 30)
     assert on_last_day.skipped is None and spans(on_last_day) == [(date(2026, 11, 1), 2)]
