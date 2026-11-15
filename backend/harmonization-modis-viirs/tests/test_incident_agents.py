@@ -304,6 +304,28 @@ def test_server_endpoints_with_fake_runner():
     assert c.post("/api/runs", json={"query": "x", "hours": 999}).status_code == 422
 
 
+def test_server_lets_only_the_dashboard_read_tickets(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from incident_agents.server import create_app
+    app = create_app(Store(":memory:"), scheduler=False, runner=lambda *a, **k: None)
+    c = TestClient(app)
+    dash, other = "http://localhost:5173", "https://example.com"
+    assert c.get("/api/tickets", headers={"Origin": dash}).headers["access-control-allow-origin"] == dash
+    assert "access-control-allow-origin" not in c.get("/api/tickets", headers={"Origin": other}).headers
+    # a browser preflight for a write from the dashboard is refused: only GET is allowed cross-origin
+    pre = c.options("/api/runs", headers={"Origin": dash, "Access-Control-Request-Method": "POST"})
+    assert pre.status_code == 400
+    # INCIDENT_CORS_ORIGINS overrides the default list; empty allows nobody
+    monkeypatch.setenv("INCIDENT_CORS_ORIGINS", "https://dash.example.org/, http://localhost:3000")
+    custom = TestClient(create_app(Store(":memory:"), scheduler=False, runner=lambda *a, **k: None))
+    assert custom.get("/api/tickets", headers={"Origin": "https://dash.example.org"}).headers["access-control-allow-origin"] == "https://dash.example.org"
+    assert "access-control-allow-origin" not in custom.get("/api/tickets", headers={"Origin": dash}).headers
+    monkeypatch.setenv("INCIDENT_CORS_ORIGINS", "")
+    none = TestClient(create_app(Store(":memory:"), scheduler=False, runner=lambda *a, **k: None))
+    assert "access-control-allow-origin" not in none.get("/api/tickets", headers={"Origin": dash}).headers
+
+
 # --- history, lead time, replay ---------------------------------------------------
 @pytest.fixture(autouse=True)
 def _no_real_history(monkeypatch, tmp_path):

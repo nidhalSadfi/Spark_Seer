@@ -18,6 +18,7 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -46,6 +47,9 @@ def create_app(store: Store | None = None, scheduler: bool = True, runner=run, r
     store = store or Store()
     sched = Scheduler(store, runner)
     app = FastAPI(title="Fire incident agents")
+    # The dashboard (another origin) may read tickets and runs, nothing more: GET only. Starting
+    # runs and editing schedules stay with this machine's own page, because they spend paid quotas.
+    app.add_middleware(CORSMiddleware, allow_origins=config.cors_origins(), allow_methods=["GET"], allow_headers=[])
 
     if scheduler:
         @app.on_event("startup")

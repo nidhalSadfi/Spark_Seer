@@ -19,6 +19,8 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-incidents.txt
 
 `serve` runs the page and the scheduler in one process, bound to 127.0.0.1 only. Data is stored in `data/incidents/incidents.sqlite`, which is gitignored.
 
+**From the dashboard.** The React dashboard's *Social Alerts* page (`frontend/`, `/dashboard/social`) reads `GET /api/tickets` from this server and lets people report a ticket as a community fire alert. For that the server answers cross-origin **GET** requests from `http://localhost:5173` and `:4173` (and the `127.0.0.1` forms). Set `INCIDENT_CORS_ORIGINS` (comma-separated, empty for none) to allow another dashboard address. Starting runs and editing schedules are never allowed cross-origin.
+
 ### 25-year cell history (optional, built once)
 
 Tickets in Tunisia, Algeria and France north of 34°N show the fire history of their 0.5° cell. The grid is `data/cells.parquet`, which is gitignored. Build it once from the public FIRMS yearly files (about 140 MB downloaded):
