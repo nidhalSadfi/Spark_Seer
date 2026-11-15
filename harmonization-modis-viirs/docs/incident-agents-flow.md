@@ -301,7 +301,7 @@ Each run reports, for each clock, the number of tickets, the median and how many
 
 | Fire | vs Kanari first detection | vs first FIRMS pass |
 |---|---|---|
-| Calenzana, Corsica, 27 Aug | posts **47 min** earlier (lower bound) | no FIRMS match |
+| Calenzana, Corsica, 27 Aug | posts **47 min** earlier | no FIRMS match |
 | Magescq, Landes, 28 Aug | satellite 26 min earlier | satellite 38 min earlier |
 | Constantine (Djebel Chettaba), Algeria, 25 Aug | posts **76 min** earlier | posts **141 min** earlier |
 | Constantine smoke photo, 26 Aug | satellite 120 min earlier | satellite 55 min earlier |

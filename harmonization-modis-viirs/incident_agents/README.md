@@ -84,7 +84,7 @@ Replay runs and tickets are marked `mode = replay`. They show a Replay badge and
 `replay "France" --from 2026-08-26 --to 2026-08-29 --max-fires 5`:
 - **Seeds:** 5 of 12 archived fires in France were replayed. All 5 tickets got "Satellite overlap" and a 25-year history.
 - **Posts:** 42 found, 37 kept, 28 judged as current fire reports.
-- **Calenzana (Corsica):** the first X post ("Un feu de végétation est signalé à Calenzana") came **47 min before** Kanari's first detection. Nearby FIRMS passes had no match. The X page was full, so this is a lower bound.
+- **Calenzana (Corsica):** the first X post ("Un feu de végétation est signalé à Calenzana") came **47 min before** Kanari's first detection. Nearby FIRMS passes had no match. The search returned fewer posts than a full page, so no earlier post was cut off.
 - **Magescq (Landes):** the satellites were first, Kanari by 26 min and a NOAA-20/21 pass by 38 min.
 - **Satellite-only seeds can be industrial heat.** Fos-sur-Mer is an industrial port, so a seed there may not be a vegetation fire.
 
