@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -101,7 +101,8 @@ def root():
 @app.get("/health")
 def health():
     rows = len(core.get_data())
-    return {"status": "ok", "data_file": core.data_path(), "rows": rows, **core.data_source()}
+    return {"status": "ok", "data_file": core.data_path(), "rows": rows, **core.data_source(),
+            "data_end_year": core.default_end_year()}
 
 
 @app.get("/areas")
@@ -115,9 +116,13 @@ def validation():
 
 
 @app.get("/calendar")
-def calendar(bbox: str | None = None, area: str | None = None, start: int = 2001, end: int = 2025):
+def calendar(bbox: str | None = None, area: str | None = None, start: int = 2001,
+             end: int | None = Query(None, description="last year (inclusive); default: the last year with "
+                                                       "data (GET /health data_end_year), 2025 with the parquet")):
     if (bbox is None) == (area is None):
         raise HTTPException(400, "give exactly one of bbox=minLon,minLat,maxLon,maxLat or area=<id>")
+    if end is None:
+        end = core.default_end_year()
     if area is not None:
         found = core.get_area(area)
         if found is None:

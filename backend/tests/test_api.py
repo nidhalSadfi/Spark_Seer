@@ -141,3 +141,34 @@ def test_meteomatics_routes_mounted_under_prefix(client):
             "/meteomatics/weather/cell/{grid_id}", "/meteomatics/weather/point",
             "/meteomatics/fires/calendar"} <= paths.keys()
     assert client.get("/meteomatics/weather/grid-meta").json()["cell_count"] == 35  # needs no cache
+
+
+def test_parquet_calendar_coverage_is_full_and_the_default_end_stays_2025(client, monkeypatch):
+    """Without a database (the Render demo): every month is "full", as before `coverage` existed,
+    and the default end is 2025 whatever the parquet's last year (the fixture's is 2015)."""
+    from api import core
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(core, "_utcnow", lambda: datetime(2016, 1, 1, tzinfo=timezone.utc))
+    health = client.get("/health").json()
+    assert (health["data_source"], health["data_end_year"]) == ("parquet", 2025)
+    body = client.get(f"/calendar?bbox={BIZERTE}").json()
+    check_calendar(body, 2001, 2025)
+    assert {r["coverage"] for r in body["months"]} == {"full"}  # even months after "now": the parquet's grid
+    explicit = client.get(f"/calendar?bbox={BIZERTE}&start=2001&end=2025").json()
+    assert body == explicit
+    later = client.get(f"/calendar?bbox={BIZERTE}&start=2014&end=2027").json()
+    check_calendar(later, 2014, 2027)
+    assert {r["coverage"] for r in later["months"]} == {"full"}
+
+
+def test_month_coverage():
+    from api.core import month_coverage
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 11, 15, tzinfo=timezone.utc)
+    cov = {(2026, 10): "partial", (2026, 11): "partial", (2025, 12): "full"}
+    years, months = [2025, 2026, 2026, 2026, 2026, 2027], [12, 1, 10, 11, 12, 1]
+    assert month_coverage(years, months, cov, now) == ["full", "none", "partial", "partial", "none", "none"]
+    assert month_coverage(years, months, None, now) == ["full"] * 6
+    assert month_coverage(years, months, {(2026, 12): "full"}, now)[4] == "none"  # future: never data

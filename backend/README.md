@@ -186,13 +186,16 @@ No parameters.
 
 ```json
 {"status": "ok", "data_file": "data/harmonized.parquet", "rows": 13070,
- "data_source": "parquet", "dataset_version_id": null}
+ "data_source": "parquet", "dataset_version_id": null, "data_end_year": 2025}
 ```
 
 `rows` counts the rows of the table `/calendar` uses (cell x month with detections).
 `data_source` says where that table comes from: `"database"` (the approved `cell_month` table;
 `dataset_version_id` is the approved version) or `"parquet"` (`data_file`; `dataset_version_id`
-null). If the parquet is needed and missing the response is a 503.
+null). `data_end_year` is the default `end` of `/calendar`: the last year with data in the approved
+dataset (2026 with the database on 2026-11-15), never before 2025, and 2025 with the parquet. The
+dashboard reads it to know how many years to show. If the parquet is needed and missing the
+response is a 503.
 
 ### `GET /areas`
 
@@ -217,7 +220,7 @@ No parameters. Read from `data/areas.json`, the data person's demo boxes
 | `bbox` | one of `bbox` / `area` | | `minLon,minLat,maxLon,maxLat`, e.g. `8.3,36.0,9.8,37.2` |
 | `area` | one of `bbox` / `area` | | an `id` from `/areas`, e.g. `bizerte` |
 | `start` | no | `2001` | first year |
-| `end` | no | `2025` | last year (inclusive) |
+| `end` | no | last year with data | last year (inclusive): `data_end_year` of `/health`, so `2025` with the parquet and `2026` with today's database |
 
 It returns 400 when neither or both of `bbox` and `area` are given, when the area id is unknown,
 or when the bbox is malformed (also minLon > maxLon or minLat > maxLat: send a box across the
@@ -229,7 +232,7 @@ the Kabylie fires).
 {
   "months": [
     {"year": 2021, "month": 8, "modis_raw": 1048.0, "viirs_raw": 4483.0, "harmonized": 4483.0,
-     "support": 3897.0, "z": 8.3, "flag": "high"}
+     "support": 3897.0, "z": 8.3, "flag": "high", "coverage": "full"}
   ],
   "meta": {
     "cells": 8,
@@ -249,6 +252,14 @@ the Kabylie fires).
 - `critical_months`: months whose median activity is in the top quarter of the year.
 - `months` is a full grid: 12 entries per year from `start` to `end`. Months with no detections
   are zeros.
+- `coverage` (added 2026-11-15; spec I7, missing is not zero): whether the approved dataset has data
+  for that month at all, over the whole dataset, not just this area. `"full"`; `"partial"` when
+  any of the dataset's rows for the month is partial (a near-real-time month still in progress, or
+  one that began mid-month); `"none"` when the dataset has no row at all for that year-month, or the
+  month is after the current UTC month. A `"none"` month keeps its zero-filled numbers (backward
+  compatible), but they are unknown, not zero: show it as no data. The anomaly baseline (`z`,
+  `flag`, `critical_months`) uses `"full"` months only, so for the years 2001-2025 the values are
+  the same whether or not 2026 is in the request. With the parquet every month is `"full"`.
 - Every 0.5 degree grid cell that overlaps (or touches) the bbox is included, so the covered area can be
   slightly larger than the bbox. `meta.cells` is the number of cells with detections.
 - Optional fields `low`, `high`, `MODIS_days`, `VIIRS_days` appear **only if**
@@ -269,9 +280,11 @@ the maths are the same either way:
   for those months, as with the parquet.
 - Optional `MODIS_days` / `VIIRS_days` come from the database only when every stored row has them
   (that is, when the bootstrapped parquet had them); `low` / `high` are not stored in the database.
-- With the database, years after the parquet (e.g. 2026 from the 3-hour job) are available with
-  `end=2026`; the default `end=2025` gives the same response as the parquet. Months the database
-  holds as unknown (NULL, spec I7) are summed as 0, like empty months.
+- With the database, years after the parquet (e.g. 2026 from the 3-hour job) are included by
+  default (`end` defaults to the last year with data); `end=2025` gives the same response as the
+  parquet apart from `coverage`. On 2026-11-15, `area=bizerte` gives 2026-01..09 `"none"` (no data
+  loaded), 2026-10 and 2026-11 `"partial"`, 2026-12 `"none"` (future). Cells the database holds as
+  unknown (NULL, spec I7) are summed as 0, like empty months.
 
 `web/mock_calendar.json` is **synthetic** data for UI work only. Never show it as real results.
 
