@@ -55,6 +55,28 @@ python -m pipeline.weather       # data/weather.json: the two named points (/met
 python -m pipeline.weather_map   # data/weather_grid.json: 35 cells (/meteomatics/weather/map, /cell, /point)
 ```
 
+World data (local only; 6.5 GB download, about 45 minutes; everything goes to `data/world/`, which
+is gitignored):
+
+```bash
+(cd harmonization-modis-viirs && python -m firms_tool archive --sensors modis_c61 --years 2001-2025 \
+    --global --out ../data/world/raw)
+(cd harmonization-modis-viirs && python -m firms_tool archive --sensors viirs_snpp --years 2012-2025 \
+    --global --out ../data/world/raw)
+python scripts/ingest_world.py data/world/raw data/world/cells.parquet --workers 3   # ~4 min, <2 GB RAM
+python scripts/build_data.py data/world/cells.parquet data/world/harmonized.parquet
+EMBER_DATA=data/world/harmonized.parquet uvicorn api.main:app --port 8000
+# any place: /calendar?bbox=148,-38,154,-28 or http://localhost:8000/web/demo/?bbox=148,-38,154,-28
+```
+
+`ingest_world.py` is the data person's ingest at world scale: it imports their filters and gives
+identical output (checked on the North Africa files), but counts one file chunk at a time instead of
+holding 334 million detections in memory. Run on 2026-11-15: 333.7 million detections (MODIS
+102.4 M, VIIRS 231.3 M), 5.0 M harmonized cell-months, 54,400 cells. The API then needs about
+0.7 GB of RAM (more than Render's free 512 MB) and answers `/calendar` in about 60 ms (0.7 s for the
+whole world). The world validation (5.4 % error) compares world-wide monthly totals, where regional
+errors cancel: it is not comparable with the 11.5 % for North Africa.
+
 Tests (synthetic data in a tmp dir, never the real files):
 
 ```bash
@@ -275,6 +297,15 @@ is cached.
   pass the FIRMS `type == 0` filter and would swamp the fire signal.
 - Limits: fires too small for MODIS cannot be recovered before 2012 (pre-2012 values are a
   lower bound); scaling MODIS by k also scales its noise.
+- Terra only before July 2002: MODIS Aqua's first detection is 2002-07-04, and Aqua makes about
+  60 % of MODIS detections (North Africa, 2003-2011). So January 2001 to June 2002 reads at about
+  40 % of its true level (world 2001: 0.36 of an average 2003-2011 year), and on a large box those
+  months are flagged `low`. Not corrected yet (open question for the method).
+- Volcanoes and gas flares outside North Africa: some pass `type == 0`, and VIIRS sees them far
+  more than MODIS, so their cells get extreme ratios (k up to 597: Holuhraun, Kilauea, Galapagos,
+  Piton de la Fournaise, the Bakken oil field). 340 of 458,159 world cell-months have k > 20, about
+  0.1 % of pre-2012 harmonized detections. A world release needs a static-source mask, like the
+  34N floor here.
 
 ## Data
 
