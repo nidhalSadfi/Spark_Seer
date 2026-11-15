@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from 'motion/react'
-import { Terrain } from '@lucasmarkes/hairline/react'
 import { Brand } from '../components/layout/Sidebar'
 import EmberField from '../components/landing/EmberField'
+import DotGlobe from '../components/landing/DotGlobe'
 import HeroTitle from '../components/landing/HeroTitle'
 import MagneticButton from '../components/landing/MagneticButton'
 import FigureShowcase, { SCENES } from '../components/landing/FigureShowcase'
@@ -11,6 +11,8 @@ import KeyHints from '../components/landing/KeyHints'
 import { ChallengeCard, TeamSection } from '../components/landing/TeamChallenge'
 import { FactsStrip, FeatureGrid, Reveal, SectionHeading } from '../components/landing/LandingParts'
 import { PROJECT } from '../config/project'
+
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 const KEY_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']
 const ROW_OFFSET = [0, 0.3, 0.8]
@@ -27,15 +29,6 @@ function keyPosition(k) {
     }
   }
   return { x: window.innerWidth / 2, y: window.innerHeight }
-}
-
-const HERO_THEME = {
-  '--hairline-plate': '#0b1322',
-  '--hairline-hi': '#fde68a',
-  '--hairline-edge': '#fb923c',
-  '--hairline-mid': '#5d6f89',
-  '--hairline-lo': '#25354c',
-  '--hairline-stroke': 1,
 }
 
 export default function Landing() {
@@ -109,15 +102,41 @@ export default function Landing() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  // Scene switching must be visible even when the showcase is off-screen: scroll it into view
+  // and flash a small "Scene n/5" pill.
+  const exploreRef = useRef(null)
+  const sceneRef = useRef(0)
+  const [sceneToast, setSceneToast] = useState(null)
+  const goScene = useCallback((next) => {
+    sceneRef.current = next
+    setScene(next)
+    setSceneToast({ n: next, key: Date.now() })
+    later(() => setSceneToast((t) => (t && t.n === next && Date.now() - t.key > 1300 ? null : t)), 1400)
+    const el = exploreRef.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      const inView = r.top < window.innerHeight * 0.55 && r.bottom > window.innerHeight * 0.45
+      if (!inView) el.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' })
+    }
+  }, [])
+
   // Keyboard: scenes, sparks, launch
   useEffect(() => {
     const onKey = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
       const el = e.target
       const interactive = el.closest?.('button, a, input, select, textarea')
-      const inFigure = el.closest?.('[role="group"]') // Hairline's Riffle owns the arrow keys when focused
+      // A figure (the globe, Hairline's card tray) owns the arrow keys / Enter while it has focus.
+      // Figures only get focus from Tab: mouse clicks on them are blocked from focusing (see their
+      // onMouseDown), so clicking or dragging never locks these shortcuts.
+      const group = el.closest?.('[role="group"]')
+      const inFigure = !!group
 
-      if (e.key === 'Enter' && !interactive) {
+      if (e.key === 'Escape') {
+        if (group) el.blur?.() // hand the arrow keys back
+        return
+      }
+      if (e.key === 'Enter' && !interactive && !inFigure) {
         flash('enter')
         enter()
         return
@@ -125,12 +144,14 @@ export default function Landing() {
       if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !inFigure) {
         flash('arrows')
         const d = e.key === 'ArrowRight' ? 1 : -1
-        setScene((s) => (s + d + SCENES.length) % SCENES.length)
+        goScene((sceneRef.current + d + SCENES.length) % SCENES.length)
         return
       }
-      if (/^[1-5]$/.test(e.key)) {
+      // Use the physical key (e.code), not e.key: on AZERTY the unshifted top row types & é " ' ( instead of 1–5.
+      const digit = /^Digit([1-5])$/.exec(e.code)?.[1] ?? (/^[1-5]$/.test(e.key) ? e.key : null)
+      if (digit) {
         flash('digits')
-        setScene(Number(e.key) - 1)
+        goScene(Number(digit) - 1)
         return
       }
       if (/^[a-z]$/i.test(e.key) && !interactive) {
@@ -142,7 +163,7 @@ export default function Landing() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [enter, flash])
+  }, [enter, flash, goScene])
 
   const launch = (e) => enter(e?.clientX || undefined, e?.clientY || undefined)
 
@@ -239,10 +260,10 @@ export default function Landing() {
             className="relative"
           >
             <div className="absolute -inset-6 rounded-[2rem] bg-fire/10 blur-3xl" aria-hidden />
-            <div className="relative overflow-hidden rounded-3xl border border-line p-3 shadow-[0_0_90px_-30px_rgba(249,115,22,0.6)]" style={{ ...HERO_THEME, background: '#0b1322' }}>
-              <span aria-hidden className="absolute left-3 top-3 z-10 size-3 border-l border-t border-fire/60" />
-              <span aria-hidden className="absolute bottom-3 right-3 z-10 size-3 border-b border-r border-fire/60" />
-              <Terrain theme="dark" intensity={0.9} play label="Pillars rising around the pointer, like hotspots" />
+            <div className="relative mx-auto max-w-[560px] overflow-hidden rounded-3xl border border-line bg-[#0b1322] shadow-[0_0_90px_-30px_rgba(249,115,22,0.6)]">
+              <span aria-hidden className="pointer-events-none absolute left-3 top-3 z-10 size-3 border-l border-t border-fire/60" />
+              <span aria-hidden className="pointer-events-none absolute bottom-3 right-3 z-10 size-3 border-b border-r border-fire/60" />
+              <DotGlobe />
             </div>
           </motion.div>
         </section>
@@ -253,12 +274,12 @@ export default function Landing() {
         </section>
 
         {/* interactive showcase */}
-        <section id="explore" className="mx-auto max-w-7xl scroll-mt-20 px-5 py-28 sm:px-8">
+        <section id="explore" ref={exploreRef} className="mx-auto max-w-7xl scroll-mt-20 px-5 py-28 sm:px-8">
           <SectionHeading kicker="How it works" title="From orbit to insight in five steps">
             Play with each figure — they respond to your pointer, and to your keyboard.
           </SectionHeading>
           <Reveal>
-            <FigureShowcase scene={scene} onScene={setScene} />
+            <FigureShowcase scene={scene} onScene={goScene} />
           </Reveal>
         </section>
 
@@ -285,7 +306,7 @@ export default function Landing() {
               Ready to <span className="text-heat">see the fire season?</span>
             </h2>
             <p className="mx-auto mt-4 max-w-lg text-muted">
-              The dashboard currently runs on illustrative sample data while the harmonized dataset is being connected.
+              Live data from the EmberLedger API when it is running; clearly labelled sample data when it is not.
             </p>
             <div className="mt-8">
               <MagneticButton onClick={launch}>Launch dashboard</MagneticButton>
@@ -294,11 +315,31 @@ export default function Landing() {
         </section>
 
         <footer className="border-t border-line pb-24 pt-6 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-faint">
-          {PROJECT.name} · {PROJECT.challenge.event}
+          <span className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            {PROJECT.team.logo && <img src={PROJECT.team.logo} alt="" className="size-7 rounded-md object-cover" />}
+            <span>{[PROJECT.name, PROJECT.team.name && `Team ${PROJECT.team.name}`, PROJECT.challenge.event].filter(Boolean).join(' · ')}</span>
+            {PROJECT.challenge.logo && <img src={PROJECT.challenge.logo} alt="" className="h-6 w-auto opacity-80" />}
+          </span>
         </footer>
       </main>
 
       <KeyHints pressed={pressed} />
+
+      <AnimatePresence>
+        {sceneToast && (
+          <motion.div
+            key={sceneToast.key}
+            role="status"
+            initial={{ opacity: 0, y: 12, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.18 }}
+            className="pointer-events-none fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full border border-fire/40 bg-bg/90 px-4 py-1.5 font-mono text-xs uppercase tracking-[0.14em] text-orange-200 shadow-[0_0_30px_-8px_rgba(249,115,22,0.6)] backdrop-blur-md"
+          >
+            Scene {sceneToast.n + 1}/{SCENES.length} · {SCENES[sceneToast.n].label}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ignition transition into the dashboard */}
       <AnimatePresence>

@@ -9,7 +9,7 @@ function Section({ children, className = '' }) {
   return <div className={`border-t border-line py-3.5 ${className}`}>{children}</div>
 }
 
-function Tile({ icon: Icon, value, label }) {
+export function Tile({ icon: Icon, value, label }) {
   return (
     <div className="grid grid-cols-[auto_1fr] items-center gap-x-2.5 rounded-lg border-b-2 border-info/50 bg-sidebar/70 px-3 py-2.5">
       <Icon className="row-span-2 size-4 text-info" aria-hidden />

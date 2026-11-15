@@ -44,13 +44,15 @@ const TONES = {
   fire: 'border-fire/40 bg-fire/10 text-orange-200',
   ok: 'border-ok/40 bg-ok/10 text-green-200',
   info: 'border-info/40 bg-info/10 text-sky-200',
+  warn: 'border-yellow-300/40 bg-yellow-300/10 text-yellow-100',
   neutral: 'border-line bg-card-hi text-muted',
 }
 
-export function Badge({ tone = 'neutral', className = '', children }) {
+export function Badge({ tone = 'neutral', className = '', children, ...rest }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${TONES[tone]} ${className}`}
+      {...rest}
     >
       {children}
     </span>

@@ -155,6 +155,53 @@ export function fireLabelIcon(fire) {
   })
 }
 
+const TICK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.6 6.3l2.3 2.3 4.5-4.9" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+/**
+ * Marker for a community report.
+ *   pending   → a "?" (nobody has confirmed it is a fire)
+ *   confirmed → the same flame as the satellite fires, with a small green tick
+ * Dismissed (false-alarm) reports are not drawn.
+ */
+export function reportIcon(report, selected) {
+  if (report.status === 'confirmed') {
+    return L.divIcon({
+      className: '',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+      html: `<div class="sg-fire${selected ? ' is-selected' : ''}" style="--s:22px;--h:58px"><span class="sg-halo"></span>${
+        selected ? '<span class="sg-core"></span>' : ''
+      }<svg viewBox="0 0 24 24" aria-hidden="true">${FLAME}</svg><span class="sg-tick">${TICK}</span></div>`,
+    })
+  }
+  return L.divIcon({
+    className: '',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    html: `<div class="sg-q${selected ? ' is-selected' : ''}"><span class="sg-q-pulse"></span><b>?</b></div>`,
+  })
+}
+
+/** The "?" shown where the person filing a report has clicked, before they submit. */
+export function draftIcon() {
+  return L.divIcon({
+    className: '',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    html: '<div class="sg-q is-draft"><span class="sg-q-pulse"></span><b>?</b></div>',
+  })
+}
+
+/** Floating label next to the selected report. */
+export function reportLabelIcon(report, text) {
+  return L.divIcon({
+    className: '',
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+    html: `<div class="sg-label"><b>${esc(report.status === 'confirmed' ? 'Confirmed community fire' : 'Unverified alert')}</b>${esc(text)}</div>`,
+  })
+}
+
 /** GeoJSON Feature for a drawn rectangle, as expected by FilterContext.setAoi. */
 export function boundsToFeature(b) {
   const [w, s, e, n] = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => +v.toFixed(4))

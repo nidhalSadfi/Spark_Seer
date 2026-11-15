@@ -1,7 +1,8 @@
 import { motion } from 'motion/react'
+import { X } from 'lucide-react'
 import { useFilters } from '../../context/FilterContext'
 import { DATA_RANGE } from '../../services/fireApi'
-import { REGIONS, SENSORS } from '../../services/constants'
+import { SENSORS } from '../../services/constants'
 import { Select } from '../ui/primitives'
 
 export function SensorSelector() {
@@ -40,14 +41,30 @@ export function SensorSelector() {
 }
 
 export function RegionSelector() {
-  const { region, setRegion } = useFilters()
+  const { areas, region, setRegion, aoi } = useFilters()
   return (
     <Select
-      label="Region"
-      value={region}
-      onChange={setRegion}
-      options={REGIONS.map((r) => ({ value: r.id, label: r.name }))}
+      label="Area"
+      value={aoi ? '' : region}
+      onChange={(v) => v && setRegion(v)}
+      options={[...(aoi ? [{ value: '', label: 'Custom area (map)' }] : []), ...areas.map((a) => ({ value: a.id, label: a.name }))]}
     />
+  )
+}
+
+/** Shown while an AOI drawn on the map is driving the data; click to go back to the named area. */
+export function AoiChip() {
+  const { aoi, setAoi } = useFilters()
+  if (!aoi) return null
+  return (
+    <button
+      type="button"
+      onClick={() => setAoi(null)}
+      className="inline-flex h-9 items-center gap-1.5 self-end rounded-lg border border-info/50 bg-info/10 px-2.5 text-xs text-sky-200 transition-colors hover:bg-info/20"
+      title="Clear the area drawn on the map"
+    >
+      Drawn area <X className="size-3.5" aria-hidden />
+    </button>
   )
 }
 

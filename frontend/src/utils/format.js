@@ -2,6 +2,9 @@ const nf = new Intl.NumberFormat('en-US')
 
 export const fmtInt = (n) => (n == null ? '—' : nf.format(Math.round(n)))
 
+/** Compact axis label: 800 → '800', 12000 → '12k'. */
+export const fmtAxis = (v) => (Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k` : String(v))
+
 export function fmtPct(p, digits = 0) {
   if (p == null) return 'n/a'
   const s = p.toFixed(digits)

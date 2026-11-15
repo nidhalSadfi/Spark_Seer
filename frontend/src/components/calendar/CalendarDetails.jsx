@@ -5,7 +5,8 @@ import EChart, { axisStyle, tooltipStyle } from '../common/EChart'
 import { Badge } from '../ui/primitives'
 import { MONTHS, anomalyPct, historicalMedian } from '../../utils/stats'
 import { anomalyTone, fmtInt, fmtPct } from '../../utils/format'
-import { sensorLabel } from '../../services/constants'
+import { FLAGS, sensorLabel } from '../../services/constants'
+import PassportSection from './PassportSection'
 
 function Stat({ label, value, tone = 'text-ink' }) {
   return (
@@ -27,8 +28,16 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
       .map((y, i) => ({ y, v: matrix.data[i][selected.month] }))
       .filter((p) => p.v != null && p.y <= selected.year)
       .slice(-10)
-    return { count, baseline, anomaly: anomalyPct(count, baseline), series }
-  }, [matrix, selected])
+    return {
+      count,
+      baseline,
+      anomaly: anomalyPct(count, baseline),
+      series,
+      // API-computed values (harmonized series only)
+      flag: sensor === 'harmonized' ? matrix.flags[yi][selected.month] : null,
+      z: sensor === 'harmonized' ? matrix.z[yi][selected.month] : null,
+    }
+  }, [matrix, selected, sensor])
 
   const chart = useMemo(() => {
     if (!detail) return null
@@ -78,12 +87,16 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
         <h4 className="text-lg font-semibold">
           {MONTHS[selected.month]} {selected.year}
         </h4>
-        <Badge tone={sensor === 'harmonized' ? 'info' : 'neutral'}>{sensorLabel(sensor)}</Badge>
+        <div className="flex items-center gap-1.5">
+          {detail.flag && FLAGS[detail.flag] && <Badge tone={FLAGS[detail.flag].tone}>{FLAGS[detail.flag].short}</Badge>}
+          <Badge tone={sensor === 'harmonized' ? 'info' : 'neutral'}>{sensorLabel(sensor)}</Badge>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Hotspots" value={fmtInt(detail.count)} />
         <Stat label="Hist. median" value={fmtInt(detail.baseline)} />
         <Stat label="Anomaly" value={fmtPct(detail.anomaly)} tone={anomalyTone(detail.anomaly)} />
+        {detail.z != null && <Stat label="Robust z-score" value={detail.z} />}
         <Stat
           label="vs. prev. year"
           value={(() => {
@@ -100,10 +113,11 @@ export default function CalendarDetails({ matrix, selected, sensor }) {
       </div>
       <p className="text-xs leading-relaxed text-faint">
         {sensor === 'harmonized'
-          ? 'Harmonized estimate (method: placeholder-v0). Not directly comparable with raw MODIS or VIIRS counts.'
+          ? 'Harmonized = VIIRS-equivalent detections: MODIS × a fitted ratio before 2012, observed VIIRS from 2012. Not directly comparable with raw counts. Flag and z-score come from the API (robust z vs. the same month in other years, |z| ≥ 3).'
           : `Raw ${sensorLabel(sensor)} detections. Not directly comparable with other sensors.`}{' '}
         Baseline: median of this calendar month in all earlier years of the record.
       </p>
+      <PassportSection year={selected.year} month={selected.month + 1} />
     </motion.div>
   )
 }
