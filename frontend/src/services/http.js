@@ -22,7 +22,8 @@ export class ApiError extends Error {
 export const isUnavailable = (e) => e instanceof ApiError && (e.status === 0 || e.status >= 500)
 
 async function request(path, { method = 'GET', params, body, headers } = {}) {
-  const url = new URL(API_BASE + path)
+  // The base may be relative ("/api" behind the production reverse proxy): resolve it against the page.
+  const url = new URL(API_BASE + path, globalThis.location?.origin)
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
   }
