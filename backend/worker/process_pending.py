@@ -80,19 +80,22 @@ def affected_keys(pending: pd.DataFrame, params: ProcessingParams = DEFAULT_PARA
     return keyed[KEY_COLS].drop_duplicates().sort_values(KEY_COLS).reset_index(drop=True).astype("int64")
 
 
-# Per affected month: the month's date range, the affected cells' bounding box (padded) and a
-# semi-join on the affected cells (SQL's floor(deg / cell_deg) on float8 is the same IEEE
-# operation as processing.grid.cell_index). All of it only pre-selects: the exact membership is
-# decided again in Python with processing.grid's rule (_inside_keys).
+# Per affected month: the month's date range, the affected cells' bounding box (padded) and the
+# affected cells themselves, as cell codes cy * CELL_CODE + cx (SQL's floor(deg / cell_deg) on
+# float8 is the same IEEE operation as processing.grid.cell_index; the codes are whole numbers far
+# below 2^53, exact in float8). The codes are a constant array (psycopg merges COPY parameters
+# client-side), which PostgreSQL >= 14 probes with a hash table: one lookup per row, never a
+# join plan that could rescan the table per cell. All of it only pre-selects: the exact
+# membership is decided again in Python with processing.grid's rule (_inside_keys).
+CELL_CODE = 1 << 20
 _DETECTIONS_SQL = """
     SELECT r.source, r.product, r.satellite, r.latitude, r.longitude, r.acq_date, r.acq_time_raw AS acq_time,
            r.confidence, r."type", r.instrument
     FROM raw_detections AS r
-    JOIN unnest(CAST(%(cy)s AS integer[]), CAST(%(cx)s AS integer[])) AS k(cy, cx)
-      ON floor(r.latitude / CAST(%(deg)s AS double precision)) = k.cy
-     AND floor(r.longitude / CAST(%(deg)s AS double precision)) = k.cx
     WHERE r.acq_date BETWEEN %(first)s AND %(last)s AND r.latitude >= %(lat0)s AND r.latitude < %(lat1)s
-      AND r.longitude >= %(lon0)s AND r.longitude < %(lon1)s"""
+      AND r.longitude >= %(lon0)s AND r.longitude < %(lon1)s
+      AND floor(r.latitude / CAST(%(deg)s AS double precision)) * %(code)s
+          + floor(r.longitude / CAST(%(deg)s AS double precision)) = ANY(CAST(%(cells)s AS double precision[]))"""
 
 
 def load_detections(engine: Engine, keys: pd.DataFrame, params: ProcessingParams = DEFAULT_PARAMS) -> pd.DataFrame:
@@ -109,8 +112,8 @@ def load_detections(engine: Engine, keys: pd.DataFrame, params: ProcessingParams
             first, last = month_bounds(int(year), int(month))
             cells = group[["cy", "cx"]].drop_duplicates()
             frame = pgcopy.read_frame(c, _DETECTIONS_SQL, {
-                "first": first, "last": last, "deg": params.cell_deg,
-                "cy": cells.cy.astype(int).tolist(), "cx": cells.cx.astype(int).tolist(),
+                "first": first, "last": last, "deg": params.cell_deg, "code": float(CELL_CODE),
+                "cells": (cells.cy.astype("int64") * CELL_CODE + cells.cx.astype("int64")).astype(float).tolist(),
                 "lat0": group.cy.min() * params.cell_deg - _PAD_DEG, "lat1": (group.cy.max() + 1) * params.cell_deg + _PAD_DEG,
                 "lon0": group.cx.min() * params.cell_deg - _PAD_DEG, "lon1": (group.cx.max() + 1) * params.cell_deg + _PAD_DEG,
             }, DETECTION_TYPES, nullable_int=("type",))
