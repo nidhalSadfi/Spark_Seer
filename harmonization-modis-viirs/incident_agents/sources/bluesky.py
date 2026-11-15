@@ -47,16 +47,19 @@ class Bluesky:
         self._jwt, self._jwt_at = r.json()["accessJwt"], time.monotonic()
         return self._jwt
 
-    def search(self, terms: list[str], lang: str, since_iso: str, limit: int = 50) -> list[Record]:
-        """One searchPosts call per term (Bluesky search has no OR operator). Deduped by URI."""
+    def search(self, terms: list[str], lang: str | None, since_iso: str, limit: int = 50,
+               until_iso: str | None = None) -> list[Record]:
+        """One searchPosts call per term (Bluesky search has no OR operator). Deduped by URI.
+        `until_iso` bounds a past window (replay); `lang=None` searches every language."""
         out: dict[str, Record] = {}
         for term in terms:
             q = f'"{term}"' if " " in term else term
             try:
                 r = self.s.get(f"{PDS}/xrpc/app.bsky.feed.searchPosts", timeout=30,
                                headers={"Authorization": f"Bearer {self._token()}"},
-                               params={"q": q, "lang": lang, "since": since_iso, "sort": "latest",
-                                       "limit": min(100, limit)})
+                               params={k: v for k, v in {"q": q, "lang": lang, "since": since_iso,
+                                                         "until": until_iso, "sort": "latest",
+                                                         "limit": min(100, limit)}.items() if v})
             except requests.RequestException as e:
                 raise SourceError(f"bluesky search: {type(e).__name__}") from None
             if r.status_code == 401:

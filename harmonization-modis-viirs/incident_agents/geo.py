@@ -119,6 +119,26 @@ class Geocoder:
         self._cache[key] = res
         return res
 
+    def country_at(self, lat: float, lon: float) -> str | None:
+        """ISO-2 country under a point (Nominatim reverse, paced 1.1 s, cached). None if unknown."""
+        key = ("rev", round(lat, 2), round(lon, 2))
+        if key in self._cache:
+            return self._cache[key]  # type: ignore[return-value]
+        with self._nom_lock:
+            wait = 1.1 - (time.monotonic() - self._nom_last)
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                r = self.s.get("https://nominatim.openstreetmap.org/reverse", timeout=30,
+                               params={"lat": lat, "lon": lon, "zoom": 3, "format": "jsonv2"})
+            except requests.RequestException:
+                return None
+            finally:
+                self._nom_last = time.monotonic()
+        cc = ((r.json().get("address") or {}).get("country_code") or "").upper() if r.ok else ""
+        self._cache[key] = cc or None
+        return cc or None
+
     def _place_single(self, name: str, country: str,
                       box: tuple[float, float, float, float] | None = None) -> Place | None:
         """Geocode one place name inside a country (and inside box, if given). Never guesses."""

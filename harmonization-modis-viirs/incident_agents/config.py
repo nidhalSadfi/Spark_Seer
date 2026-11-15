@@ -82,6 +82,7 @@ class Caps:
     FIRMS_CHECKS_PER_RUN: int = 10
     GROQ_CALLS_PER_DAY: int = 900          # free tier: 1,000 requests per day
     SATELLITE_TICKETS_PER_ZONE: int = 20
+    REPLAY_MAX_FIRES: int = 6
     MIN_SCHEDULE_MINUTES: int = 15
 
 

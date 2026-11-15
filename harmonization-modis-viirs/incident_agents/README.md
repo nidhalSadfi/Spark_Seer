@@ -13,10 +13,23 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-incidents.txt
 .venv/Scripts/python.exe -m incident_agents serve        # http://127.0.0.1:8765
 .venv/Scripts/python.exe -m incident_agents run "France" --hours 24
 .venv/Scripts/python.exe -m incident_agents run "Kabylie, Algeria" --hours 72 --satellite-only
+.venv/Scripts/python.exe -m incident_agents replay "France" --from 2026-08-26 --to 2026-08-29
 .venv/Scripts/python.exe -m incident_agents tickets
 ```
 
 `serve` runs the page and the scheduler in one process, bound to 127.0.0.1 only. Data is stored in `data/incidents/incidents.sqlite`, which is gitignored.
+
+### 25-year cell history (optional, built once)
+
+Tickets in Tunisia, Algeria and France north of 34°N show the fire history of their 0.5° cell. The grid is `data/cells.parquet`, which is gitignored. Build it once from the public FIRMS yearly files (about 140 MB downloaded):
+
+```bash
+.venv/Scripts/python.exe -m firms_tool archive --sensors modis_c61 --years 2001-2025 --countries Tunisia Algeria France --out data/raw
+.venv/Scripts/python.exe -m firms_tool archive --sensors viirs_snpp --years 2012-2025 --countries Tunisia Algeria France --out data/raw
+.venv/Scripts/python.exe pipeline/ingest.py data/raw data/cells.parquet 34
+```
+
+Without the file, tickets simply carry no history. If you add more countries, set `INCIDENT_HISTORY_COUNTRIES` (default `TN,DZ,FR`) to match.
 
 ## Secrets (`.env`, gitignored)
 
@@ -41,7 +54,32 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-incidents.txt
 | ticket | code | Merges reports in the same country within the larger radius (at least 10 km) and 48 h. A URL is never counted twice. |
 | satellite | code | Kanari clusters for the country, one call per run, then FIRMS NOAA-20/21 and MODIS NRT in a small box. Status: **Satellite overlap**, **No satellite support** or **Mentioned**. |
 
+| history | code | The 0.5° cell under the ticket: MODIS years with fire out of 25, detections, peak month, worst year, and how the cell ranks in the grid. MODIS and VIIRS are never summed. |
+| lead | code | Signed minutes from the first public post to the first satellite detection (positive: people posted first), kept separately against Kanari's first detection and the first FIRMS polar pass. |
+
 `--satellite-only` also opens tickets from Kanari satellite clusters that have no post. It keeps the 20 largest clusters per zone. In Algeria, Tunisia and Libya, clusters south of 34°N are skipped, because they are almost always oil and gas flares.
+
+## Replay a past window
+
+`replay` (or "Replay a past window" on the page) rebuilds what the agents would have found on past dates. Kanari's archive starts on **3 Aug 2026**, so earlier dates are refused. A replay covers at most 31 days.
+
+A broad keyword search over a past window only reaches its last few hours: sources return newest first, and our page caps stop there. So a replay is **fire-seeded**:
+
+1. It lists the significant fires Kanari archived in the zones. It keeps those inside a zone box and checks their country with a reverse geocode, because Kanari tagged Zaragoza and Bilbao as FR. Flares are dropped. Fires with witness posts or press come first, then the largest, up to 6 (`REPLAY_MAX_FIRES`).
+2. Each fire becomes a satellite ticket. Its place name is searched on Bluesky and X, from 6 h before to 24 h after Kanari first saw it.
+3. The posts go through the same judge, locator and merge steps as a live run. The satellite check uses the archive plus FIRMS. FIRMS uses standard processing where it exists, NRT after it, and adds S-NPP before 2 Nov 2026.
+
+Replay runs and tickets are marked `mode = replay`. They show a Replay badge and never merge with live tickets. Schedules are live only. The lead times describe fires that Kanari saw, so they cannot show how often posts come with no satellite detection at all.
+
+## Checked live on 15 Nov 2026 (replay)
+
+`replay "France" --from 2026-08-26 --to 2026-08-29 --max-fires 5`:
+- **Seeds:** 5 of 12 archived fires in France were replayed. All 5 tickets got "Satellite overlap" and a 25-year history.
+- **Posts:** 42 found, 37 kept, 28 judged as current fire reports.
+- **Calenzana (Corsica):** the first X post ("Un feu de végétation est signalé à Calenzana") came **47 min before** Kanari's first detection. Nearby FIRMS passes had no match.
+- **Magescq (Landes):** the satellites were first, Kanari by 26 min and a FIRMS pass by 38 min.
+- **Two tickets is too few for a general claim.** Kanari's first detection is usually Meteosat MTG, a geostationary satellite imaging every 10 minutes, which is hard for posts to beat.
+- **Satellite-only seeds can be industrial heat.** Fos-sur-Mer is an industrial port, so a seed there may not be a vegetation fire.
 
 ## Checked live on 14 Nov 2026
 
@@ -67,5 +105,6 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-incidents.txt
 
 - The Bluesky Jetstream stream: tested, and it can rewind 24 h with no key, but it is not wired in.
 - Review actions on tickets.
-- The 25-year cell history on Tunisia and Algeria tickets.
 - Official civil-protection feeds.
+- Replay before 3 Aug 2026, such as the 2021 or 2023 seasons. It would need FIRMS clusters as seeds instead of Kanari's archive.
+- GDELT in replay. It is not searched there.

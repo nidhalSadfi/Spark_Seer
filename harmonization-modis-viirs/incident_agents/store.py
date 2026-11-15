@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS verdicts (
   url TEXT PRIMARY KEY, judged_at TEXT NOT NULL, model TEXT, verdict TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_events_run ON events(run_id, id);
+-- columns added later are created by Store._migrate()
 CREATE INDEX IF NOT EXISTS ix_sources_url ON ticket_sources(url);
 """
 
@@ -68,6 +69,19 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL") if self.path != ":memory:" else None
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    # Columns added after the first release; ALTER keeps existing databases working.
+    _ADDED = {"tickets": {"mode": "TEXT NOT NULL DEFAULT 'live'", "history": "TEXT"},
+              "runs": {"mode": "TEXT NOT NULL DEFAULT 'live'"}}
+
+    def _migrate(self) -> None:
+        for table, cols in self._ADDED.items():
+            have = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            for col, decl in cols.items():
+                if col not in have:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        self.conn.commit()
 
     def x(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -80,9 +94,9 @@ class Store:
             return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
     # runs -------------------------------------------------------------
-    def start_run(self, query: str, hours: int, schedule_id: int | None = None) -> int:
-        return self.x("INSERT INTO runs(query, schedule_id, hours, started_at, status) VALUES (?,?,?,?,?)",
-                      (query, schedule_id, hours, now_iso(), "running")).lastrowid
+    def start_run(self, query: str, hours: int, schedule_id: int | None = None, mode: str = "live") -> int:
+        return self.x("INSERT INTO runs(query, schedule_id, hours, started_at, status, mode) VALUES (?,?,?,?,?,?)",
+                      (query, schedule_id, hours, now_iso(), "running", mode)).lastrowid
 
     def finish_run(self, run_id: int, status: str, plan: dict | None, summary: dict) -> None:
         self.x("UPDATE runs SET finished_at=?, status=?, plan=?, summary=? WHERE id=?",
@@ -126,17 +140,23 @@ class Store:
                (url, now_iso(), model, json.dumps(verdict, ensure_ascii=False)))
 
     # tickets ----------------------------------------------------------
-    def recent_tickets(self, since_iso: str) -> list[dict]:
-        return self.q("SELECT * FROM tickets WHERE last_seen>=? ORDER BY id", (since_iso,))
+    def recent_tickets(self, since_iso: str, mode: str = "live", until_iso: str | None = None) -> list[dict]:
+        """Tickets a new report may join. Replay tickets and live tickets never merge."""
+        if until_iso:
+            return self.q("SELECT * FROM tickets WHERE mode=? AND last_seen>=? AND first_seen<=? ORDER BY id",
+                          (mode, since_iso, until_iso))
+        return self.q("SELECT * FROM tickets WHERE mode=? AND last_seen>=? ORDER BY id", (mode, since_iso))
 
-    def url_ticket(self, url: str) -> int | None:
-        rows = self.q("SELECT ticket_id FROM ticket_sources WHERE url=? LIMIT 1", (url,))
+    def url_ticket(self, url: str, mode: str = "live") -> int | None:
+        rows = self.q("SELECT s.ticket_id FROM ticket_sources s JOIN tickets t ON t.id=s.ticket_id "
+                      "WHERE s.url=? AND t.mode=? LIMIT 1", (url, mode))
         return rows[0]["ticket_id"] if rows else None
 
     def tickets_with_sources(self, limit: int = 100) -> list[dict]:
         ts = self.q("SELECT * FROM tickets ORDER BY updated_at DESC, id DESC LIMIT ?", (limit,))
         for t in ts:
             t["satellite"] = json.loads(t["satellite"]) if t["satellite"] else None
+            t["history"] = json.loads(t["history"]) if t.get("history") else None
             t["sources"] = self.q("SELECT source, kind, url, author, published_at, fetched_at, excerpt, place_phrase "
                                   "FROM ticket_sources WHERE ticket_id=? ORDER BY published_at", (t["id"],))
         return ts

@@ -42,6 +42,11 @@
   a { color:var(--accent); word-break:break-all; }
   .sched { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-top:1px solid var(--line); font-size:12px; }
   .note { font-size:12px; color:var(--muted); margin-top:8px; }
+  .b-replay { color:var(--info); }
+  .ticket.replay { border-style:dashed; }
+  .extra { font-size:12px; margin-top:4px; }
+  .extra b { font-weight:600; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -63,6 +68,15 @@
         <button class="ghost" id="sched">Schedule</button>
       </div>
       <div id="schedules"></div>
+      <details>
+        <summary>Replay a past window</summary>
+        <div class="row">
+          <label>From <input id="rfrom" type="date" min="2026-08-03"></label>
+          <label>To <input id="rto" type="date" min="2026-08-03"></label>
+          <button class="ghost" id="replay">Replay</button>
+        </div>
+        <p class="note">Rebuilds what the agents would have found, starting from fires in Kanari's archive (from 3 Aug 2026). Replay tickets are marked and never mix with live ones.</p>
+      </details>
       <p class="note">Satellite data and verified signals: Source: <a href="https://kanari.io" target="_blank" rel="noopener">kanari.io</a> (CC BY 4.0), NASA FIRMS.</p>
     </section>
     <section style="margin-top:16px">
@@ -87,14 +101,28 @@ function addEvent(e) {
   const tag = e.source ? `${e.step}/${e.source}` : e.step;
   d.innerHTML = `<span class="t">${esc((e.ts||"").slice(11,19))}</span><span class="s-${esc(e.status)}">${esc(tag)} · ${esc(e.status)}</span><span>${e.run_id ? "#"+esc(e.run_id)+" " : ""}${esc(e.message)}</span>`;
   const box = $("steps"); box.appendChild(d); box.scrollTop = box.scrollHeight;
-  if (["ticket","satellite"].includes(e.step) || (e.step === "run" && ["done","error"].includes(e.status))) loadTickets();
-  if (e.step === "run" && ["done","error"].includes(e.status)) $("run").disabled = false;
+  if (["ticket","satellite","history","lead"].includes(e.step) || (e.step === "run" && ["done","error"].includes(e.status))) loadTickets();
+  if (e.step === "run" && ["done","error"].includes(e.status)) { $("run").disabled = false; $("replay").disabled = false; }
 }
 
 function listen(after) {
   if (es) es.close();
   es = new EventSource(`/api/events/stream?after=${after}`);
   es.onmessage = (m) => addEvent(JSON.parse(m.data));
+}
+
+const fmtMin = (m) => m >= 120 ? `${(m/60).toFixed(1)} h` : `${m} min`;
+const signed = (m) => m == null ? null : (m > 0 ? `posts ${fmtMin(m)} before` : m < 0 ? `satellite ${fmtMin(-m)} before` : "same time");
+function leadLine(t) {
+  const l = t.satellite && t.satellite.lead;
+  if (!l) return "";
+  const parts = [];
+  if (l.minutes_vs_kanari != null) parts.push(`vs Kanari first detection: <b>${esc(signed(l.minutes_vs_kanari))}</b>`);
+  if (l.minutes_vs_polar != null) parts.push(`vs first FIRMS pass: <b>${esc(signed(l.minutes_vs_polar))}</b>`);
+  return `<div class="extra">Lead time (first post ${esc(l.social_first)}): ${parts.join(" · ")}</div>`;
+}
+function historyLine(t) {
+  return t.history ? `<div class="extra">History: ${esc(t.history.text)} <span class="meta">cell ${esc(t.history.cell_id)}</span></div>` : "";
 }
 
 function badge(st) {
@@ -110,9 +138,10 @@ async function loadTickets() {
       ? `<div class="meta">Satellite: ${t.satellite.matches.slice(0,3).map(m => `${esc(m.source)} ${esc(m.place || m.sensor || "")} ${m.km != null ? esc(m.km)+" km" : ""} ${esc(m.last_seen || m.acq_date || "")}`).join(" · ")}</div>`
       : (t.satellite ? `<div class="meta">Satellite checked (${esc((t.satellite.checked||[]).join(", ") || "none")}), radius ${esc(t.satellite.radius_km)} km: nothing found — not evidence of no fire.</div>` : "");
     const rows = t.sources.map(s => `<tr><td>${esc(s.source)}</td><td>${esc(s.published_at)}</td><td>${esc(s.fetched_at)}</td><td><a href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">${esc(s.url)}</a><div class="meta">${esc(s.excerpt)}</div></td></tr>`).join("");
-    return `<div class="ticket"><h3>#${esc(t.id)} ${esc(t.title)}</h3>
-      <div class="meta">${badge(t.status)}${esc(t.country)} · ${esc(t.lat?.toFixed(3))}, ${esc(t.lon?.toFixed(3))} · ${esc(t.precision)} ±${esc(t.radius_km)} km · ${esc(t.first_seen)} → ${esc(t.last_seen)}</div>
-      ${sat}
+    const rp = t.mode === "replay";
+    return `<div class="ticket${rp ? " replay" : ""}"><h3>#${esc(t.id)} ${esc(t.title)}</h3>
+      <div class="meta">${rp ? '<span class="badge b-replay">Replay</span>' : ""}${badge(t.status)}${esc(t.country)} · ${esc(t.lat?.toFixed(3))}, ${esc(t.lon?.toFixed(3))} · ${esc(t.precision)} ±${esc(t.radius_km)} km · ${esc(t.first_seen)} → ${esc(t.last_seen)}</div>
+      ${sat}${leadLine(t)}${historyLine(t)}
       <table><tr><th>Source</th><th>Published</th><th>Fetched</th><th>Link</th></tr>${rows}</table></div>`;
   }).join("");
 }
@@ -127,6 +156,12 @@ $("run").onclick = async () => {
   $("run").disabled = true;
   const r = await fetch("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, hours:+$("hours").value})});
   if (!r.ok) { $("run").disabled = false; alert((await r.json()).detail || "could not start"); }
+};
+$("replay").onclick = async () => {
+  if (!$("rfrom").value || !$("rto").value) { alert("Pick both dates"); return; }
+  $("run").disabled = true; $("replay").disabled = true;
+  const r = await fetch("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, replay_from:$("rfrom").value, replay_to:$("rto").value})});
+  if (!r.ok) { $("run").disabled = false; $("replay").disabled = false; alert(JSON.stringify((await r.json()).detail) || "could not start"); }
 };
 $("sched").onclick = async () => {
   await fetch("/api/schedules", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, hours:+$("hours").value, interval_min:+$("every").value})});

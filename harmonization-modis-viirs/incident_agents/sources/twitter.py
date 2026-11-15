@@ -20,10 +20,19 @@ from . import Record, SourceError, parse_iso, utc_iso
 URL = "https://api.twitterapi.io/twitter/tweet/advanced_search"
 
 
-def build_query(terms: list[str], lang: str, since_iso: str) -> str:
+def build_query(terms: list[str], lang: str | None, since_iso: str, until_iso: str | None = None,
+                must: str | None = None) -> str:
+    """`must` is a phrase every tweet has to contain (the place name in a replay)."""
     ors = " OR ".join(f'"{t}"' if " " in t else t for t in terms)
     since = parse_iso(since_iso) or datetime.utcnow()
-    return f"({ors}) lang:{lang} -is:retweet since_time:{int(since.timestamp())}"
+    q = (f'"{must}" ' if must else "") + f"({ors})"
+    if lang:
+        q += f" lang:{lang}"
+    q += f" -is:retweet since_time:{int(since.timestamp())}"
+    until = parse_iso(until_iso) if until_iso else None
+    if until:
+        q += f" until_time:{int(until.timestamp())}"
+    return q
 
 
 MIN_GAP_S = 6.0  # free tier measured 14 Nov 2026: "one request every 5 seconds"
@@ -45,11 +54,12 @@ class TwitterAPI:
     def available(self) -> bool:
         return bool(self.key)
 
-    def search(self, terms: list[str], lang: str, since_iso: str, max_pages: int) -> tuple[list[Record], int]:
+    def search(self, terms: list[str], lang: str | None, since_iso: str, max_pages: int,
+               until_iso: str | None = None, must: str | None = None) -> tuple[list[Record], int]:
         """Returns (records, pages_used)."""
         if not self.available:
             raise SourceError("x: no twitterapi key in .env")
-        query = build_query(terms, lang, since_iso)
+        query = build_query(terms, lang, since_iso, until_iso, must)
         out: dict[str, Record] = {}
         cursor, pages = "", 0
         while pages < max_pages:

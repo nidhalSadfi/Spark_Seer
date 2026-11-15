@@ -114,6 +114,8 @@ sequenceDiagram
 | 6 | **locate** | Code: Open-Meteo, then Nominatim | The place phrase and country | Point, precision (town, area, region) and radius in km | `locate · ok  3 located` |
 | 7 | **ticket** | Code | Located reports | A new ticket, or an update to one within the larger radius (at least 10 km) and 48 h | `ticket · created  #12 …` |
 | 8 | **satellite** | Code: Kanari clusters, then FIRMS NOAA-20/21 and MODIS | Ticket point and time | Ticket status and the matching detections | `satellite · ok  #12: Satellite overlap` |
+| 9 | **history** | Code: `data/cells.parquet` from the harmonization work | Ticket point and month | 25-year record of the 0.5° cell (see section 10) | `history · ok  25-year cell history on 5 of 5 tickets` |
+| 10 | **lead** | Code | First post time, first satellite times | Signed minutes, per ticket and as a run summary | `lead · ok  … median +10 min over 2 tickets` |
 
 ## 3. Why there are two kinds of agent
 
@@ -203,7 +205,9 @@ stateDiagram-v2
     judge --> locate
     locate --> ticket
     ticket --> satellite
-    satellite --> done
+    satellite --> history
+    history --> lead
+    lead --> done
     plan --> error: plan still invalid after retries
     judge --> locate: daily model cap, rest skipped
     done --> [*]
@@ -235,17 +239,83 @@ A failing source writes an `error` event for that source, and the run continues 
 | `geo.py` | Country boxes, zone boxes, place geocoding with precision |
 | `sources/` | One connector per source: `kanari`, `bluesky`, `twitter`, `gdelt`, `firms` |
 | `judge.py` | Judge agent and the code checks on its answers |
-| `tickets.py` | Merging, upsert, satellite check and status |
-| `pipeline.py` | One run from end to end, emitting every event |
+| `tickets.py` | Merging, upsert, satellite check, status and lead time |
+| `history.py` | 25-year cell history from `data/cells.parquet` |
+| `pipeline.py` | One live run or one replay from end to end, emitting every event |
 | `store.py` | SQLite (WAL) tables and queries |
 | `scheduler.py` | Background thread that runs due schedules |
 | `server.py` + `static/index.html` | FastAPI endpoints, the event stream and the page |
-| `../tests/test_incident_agents.py` | 20 offline tests with fake model and sources |
+| `../tests/test_incident_agents.py` | 26 offline tests with fake model and sources |
 
 ## 9. Not done yet
 
 - Bluesky Jetstream, the live firehose: tested, not wired in.
 - Review actions on tickets (confirm or dismiss).
-- The 25-year cell history from the harmonization work on Tunisia and Algeria tickets.
 - Official civil-protection feeds.
 - A working GDELT path from this machine.
+- Replay before 3 Aug 2026, such as the 2021 or 2023 seasons. It would need FIRMS clusters as seeds.
+
+## 10. Replay, lead time and cell history
+
+These three additions turn a quiet November into something we can demonstrate and measure.
+
+### Replay a past window
+
+A live run looks at the last few hours. A replay rebuilds a past window, from 3 Aug 2026 (the start of Kanari's archive) up to yesterday. It can't simply search the whole window, because each source returns newest first and our page caps stop after the last few hours. So a replay starts from each fire Kanari archived and searches around it:
+
+```mermaid
+flowchart TD
+    Q["Query + date range<br/>e.g. France, 26-29 Aug 2026"] --> P["Planner agent<br/>zones + keywords"]
+    P --> A["Kanari fire_archive_search<br/>per country, range +-1-2 days"]
+    A --> S{"Inside a zone box?<br/>Reverse geocode agrees?<br/>Not a flare?"}
+    S -- no --> D["Dropped<br/>e.g. Zaragoza tagged FR"]
+    S -- yes --> K["Seeds: witness posts or press first,<br/>then size, max 6"]
+    K --> T1["Satellite ticket per seed<br/>(mode = replay)"]
+    K --> W["Search the place name<br/>Bluesky + X, from 6 h before<br/>to 24 h after first detection"]
+    W --> J["Same judge, locate and merge as live"]
+    J --> T1
+    T1 --> C["Satellite check: archive + FIRMS<br/>(SP where it exists, then NRT, S-NPP before 2 Nov)"]
+    C --> H["Cell history"]
+    H --> L["Lead time summary"]
+```
+
+Replay tickets have a Replay badge and a dashed border. They never merge with live tickets, and schedules can't replay.
+
+### Lead time: did people post before the satellites saw it?
+
+For each ticket with at least one post and one satellite match, the code computes:
+
+| Field | Meaning |
+|---|---|
+| `social_first` | Earliest publish time among the ticket's posts and news items |
+| `kanari_first` | Kanari's first detection of the matching fire, usually Meteosat MTG, which images every 10 minutes |
+| `polar_first` | First FIRMS polar-orbit detection (VIIRS or MODIS, a few passes a day) |
+| `minutes_vs_kanari`, `minutes_vs_polar` | Satellite time minus post time. **Positive means people posted first.** |
+
+Each run reports, for each clock, the number of tickets, the median and how many tickets had posts first or satellite first. First replay, France 26–29 Aug 2026:
+- **Calenzana:** posts came 47 min before Kanari's first detection.
+- **Magescq:** the satellites were first, Kanari by 26 min and FIRMS by 38 min.
+
+Two tickets isn't enough to generalize. A geostationary satellite is hard to beat, so the stronger claim may be against polar passes, or for fires Kanari never flagged.
+
+### 25-year cell history
+
+Every ticket is placed in the same 0.5° grid as the harmonization work (`pipeline/ingest.py`). The page then shows that cell's record, for example:
+
+> MODIS saw fire in this 0.5° cell (about 55 km) in 25 of 25 years (3005 detections, peak month Aug, worst year 2021). Aug had fire in 24 of those years. Busier than 99% of the cells with fire in the grid.
+
+That example is the cell around Tizi Ouzou in Kabylie; 2021 was the year of the deadly Kabylie fires.
+
+```mermaid
+flowchart LR
+    F["FIRMS public yearly files<br/>MODIS 2001-2025, VIIRS S-NPP 2012-2025<br/>Tunisia, Algeria, France"] --> I["pipeline/ingest.py<br/>lat >= 34, type 0, confidence filters"]
+    I --> G[("data/cells.parquet<br/>cell, year, month, sensor, n, days")]
+    T["Ticket lat, lon, month"] --> C["history.py<br/>floor(lat*2), floor(lon*2)"]
+    G --> C
+    C --> O["Years with fire of 25, detections,<br/>peak month, worst year,<br/>same-month years, rank in grid"]
+```
+
+Rules:
+- **MODIS and VIIRS are never summed,** because their pixel sizes differ.
+- **No history is not the same as no fire.** A ticket outside the covered countries, or south of 34°N, carries no history. A covered cell with no detections says so explicitly.
+- **The grid file is not committed,** because `data/` is gitignored. The README gives the three commands that rebuild it.

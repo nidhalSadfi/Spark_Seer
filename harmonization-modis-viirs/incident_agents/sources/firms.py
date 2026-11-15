@@ -16,6 +16,8 @@ from datetime import date, datetime, timedelta, timezone
 from firms_tool import area_api
 
 SENSORS = ("viirs_noaa20", "viirs_noaa21", "modis_c61")
+SNPP_END = date(2026, 11, 2)  # S-NPP data are valid before this date
+NRT_DAYS = 9
 
 
 class _FastClient(area_api.Client):
@@ -40,11 +42,23 @@ class Firms:
             raise area_api.ApiError("no FIRMS map key")
         today = datetime.now(timezone.utc).date()
         end = min(end, today)
-        start = max(start, today - timedelta(days=9))
+        if start >= today - timedelta(days=NRT_DAYS):  # live: near-real-time only
+            mode, sensors = "nrt", SENSORS
+        else:  # replay: standard processing where it exists, NRT after it
+            mode, sensors = "auto", SENSORS + (("viirs_snpp",) if start < SNPP_END else ())
         rows: list[dict] = []
-        for key in SENSORS:
-            text = area_api.query_viewport(box, key, start, end, mode="nrt", client=self.client)
+        missing = 0
+        for key in sensors:
+            try:
+                text = area_api.query_viewport(box, key, start, end, mode=mode, client=self.client)
+            except area_api.ApiError as e:
+                if "coverage" not in str(e):
+                    raise
+                missing += 1  # this sensor has no data for these dates
+                continue
             for row in csv.DictReader(io.StringIO(text)):
                 row["sensor"] = key
                 rows.append(row)
+        if missing == len(sensors):
+            raise area_api.ApiError("no FIRMS coverage for these dates")
         return rows

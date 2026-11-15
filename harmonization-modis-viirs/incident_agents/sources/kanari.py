@@ -131,3 +131,26 @@ class Kanari:
         elif country:
             args["country"] = country
         return self.mcp("active_fires", args).get("fires", [])
+
+    def archive_fires(self, country: str, start: str, end: str, limit: int = 100) -> tuple[list[dict], bool]:
+        """Significant fires in Kanari's archive (it starts on 2026-08-03) whose first detection is in
+        [start, end) (YYYY-MM-DD). Returns (fires, capped): capped means the 100-item limit was hit."""
+        d = self.mcp("fire_archive_search", {"country": country, "from": start, "to": end,
+                                             "order": "recent", "limit": limit})
+        fires = d.get("fires", [])
+        return fires, len(fires) >= limit
+
+
+ARCHIVE_START = "2026-08-03"
+
+
+class ArchiveSat:
+    """Gives satellite_check the same fires_near() call over a preloaded archive list (replay)."""
+
+    def __init__(self, fires: list[dict]):
+        self.fires = [f for f in fires if f.get("lat") is not None]
+
+    def fires_near(self, lat: float, lon: float, radius_km: float, hours: int,
+                   country: str | None = None) -> list[dict]:
+        from ..geo import haversine_km
+        return [f for f in self.fires if haversine_km(lat, lon, f["lat"], f["lon"]) <= radius_km]

@@ -33,6 +33,9 @@ class FakeGeocoder:
             return (FR_BOX if name == "France" else (5.6, 42.9, 6.9, 43.8)), name
         return None
 
+    def country_at(self, lat, lon):
+        return "ES" if lon < 0 and lat < 43 else "FR"
+
     def place(self, name, country, box=None):
         from incident_agents.geo import Place
         if country == "FR" and name in self.places:
@@ -299,3 +302,151 @@ def test_server_endpoints_with_fake_runner():
     assert len(c.get("/api/schedules").json()) == 1
     assert c.get("/api/tickets").json() == []
     assert c.post("/api/runs", json={"query": "x", "hours": 999}).status_code == 422
+
+
+# --- history, lead time, replay ---------------------------------------------------
+@pytest.fixture(autouse=True)
+def _no_real_history(monkeypatch, tmp_path):
+    """Tests never read the real data/cells.parquet."""
+    from incident_agents import history
+    monkeypatch.setattr(history, "CELLS_PATH", tmp_path / "missing.parquet")
+    history._frame.cache_clear()
+
+
+def test_cell_history_from_tiny_grid(tmp_path):
+    import pandas as pd
+
+    from incident_agents import history
+    rows = []
+    for year in (2003, 2007, 2021):  # the ticket's cell: fire in 3 years, two of them in August
+        rows.append({"lat_i": 90, "lon_i": 10, "year": year, "month": 8 if year != 2003 else 7, "sensor": "MODIS",
+                     "n": 10 * (year - 2000), "days": 2})
+    rows.append({"lat_i": 91, "lon_i": 10, "year": 2010, "month": 8, "sensor": "MODIS", "n": 1, "days": 1})
+    rows.append({"lat_i": 90, "lon_i": 10, "year": 2021, "month": 8, "sensor": "VIIRS", "n": 999, "days": 4})
+    df = pd.DataFrame(rows)
+    df["cell_id"], df["lat"], df["lon"] = "x", 0.0, 0.0
+    path = tmp_path / "cells.parquet"
+    df.to_parquet(path)
+    h = history.cell_history(45.2, 5.1, "FR", month=8, path=path)
+    assert h["cell_id"] == "45.0_5.0"
+    assert h["modis"]["years_with_fire"] == 3 and h["modis"]["of_years"] == 25
+    assert h["modis"]["detections"] == 30 + 70 + 210  # VIIRS never summed into MODIS
+    assert h["modis"]["worst_year"] == 2021 and h["modis"]["same_month_years"] == 2
+    assert h["viirs"]["detections"] == 999
+    assert "3 of 25 years" in h["text"]
+    assert history.cell_history(45.2, 5.1, "ES", path=path) is None   # country not in the grid
+    assert history.cell_history(31.0, 5.0, "DZ", path=path) is None   # south of 34°N
+    assert history.cell_history(45.2, 5.1, "FR") is None              # no grid file
+
+
+def test_lead_time_signed_minutes_and_summary():
+    s = Store(":memory:")
+    tid, _ = tickets.upsert(s, located(1, hours_ago=3), 1, [])
+    post = NOW - timedelta(hours=3)
+    fire = {"place": "X", "lat": 45.01, "lon": 5.01, "detections": 4, "sensors": {"mtg": 4},
+            "firstSeen": iso(post + timedelta(minutes=40)), "lastSeen": iso(NOW), "url": "https://kanari.io/f"}
+
+    class FakeFirms:
+        available = True
+
+        def detections(self, box, start, end):
+            t = post - timedelta(minutes=30)
+            return [{"latitude": "45.0", "longitude": "5.0", "acq_date": t.strftime("%Y-%m-%d"),
+                     "acq_time": t.strftime("%H%M"), "confidence": "n"}]
+
+    tickets.satellite_check(s, tid, FakeKanari([fire]), FakeFirms(), 24, lambda *a, **k: None)
+    lead = s.tickets_with_sources()[0]["satellite"]["lead"]
+    assert lead["minutes_vs_kanari"] == 40      # people posted 40 min before Kanari's first detection
+    assert lead["minutes_vs_polar"] in (-31, -30)  # a polar pass saw it 30 min before the first post (HHMM)
+    summ = tickets.lead_summary(s, [tid])
+    assert summ["minutes_vs_kanari"]["posts_first"] == 1 and summ["minutes_vs_polar"]["satellite_first"] == 1
+
+
+def test_old_database_gets_new_columns():
+    import sqlite3
+    path = ":memory:"
+    s = Store(path)
+    cols = {r["name"] for r in s.q("PRAGMA table_info(tickets)")}
+    assert {"mode", "history"} <= cols
+
+
+def test_x_query_with_window_and_place():
+    from incident_agents.sources.twitter import build_query
+    q = build_query(["incendie", "feu de forêt"], None, "2026-08-27T08:00:00Z", "2026-08-28T14:00:00Z",
+                    must="Calenzana")
+    assert q.startswith('"Calenzana" (incendie OR "feu de forêt")') and "lang:" not in q
+    assert "since_time:1787817600" in q and "until_time:1787925600" in q
+
+
+class FakeArchiveKanari(FakeKanariFull):
+    def __init__(self, fires):
+        super().__init__([])
+        self.archive = fires
+
+    def archive_fires(self, country, start, end, limit=100):
+        return self.archive, False
+
+
+class FakeWindowSource(FakeSource):
+    def __init__(self, recs):
+        super().__init__(recs)
+        self.calls = []
+
+    def search(self, terms, lang, since_iso, limit, until_iso=None, **kw):
+        self.calls.append((terms, since_iso, until_iso))
+        return self.recs
+
+
+def test_replay_seeds_from_archive_and_keeps_tickets_apart():
+    from incident_agents.pipeline import replay
+    day = (NOW - timedelta(days=5)).replace(hour=12, minute=0, second=0)
+    archive = [
+        {"slug": "ville-a-1", "url": "https://kanari.io/fr/feu/ville-a-1", "place": "Ville-A", "country": "FR",
+         "lat": 45.0, "lon": 5.0, "firstSeen": iso(day), "lastSeen": iso(day + timedelta(hours=2)),
+         "detections": 50, "sensors": {"mtg": 50}, "witnessPosts": 0, "firstPressArticle": None},
+        {"slug": "zaragoza-1", "url": "https://kanari.io/fr/feu/zaragoza-1", "place": "Zaragoza", "country": "FR",
+         "lat": 41.6, "lon": -0.9, "firstSeen": iso(day), "lastSeen": iso(day), "detections": 90,
+         "sensors": {"mtg": 90}, "witnessPosts": 3, "firstPressArticle": None},  # outside the France box
+    ]
+    post = Record(source="bluesky", kind="post", record_id="p1", url="https://example.test/p1",
+                  text="Incendie de forêt à Ville-A", published_at=iso(day - timedelta(minutes=20)),
+                  fetched_at=iso(NOW))
+    bsky = FakeWindowSource([post])
+    s = Store(":memory:")
+    clients = Clients(llm=FakeLLM(), geocoder=FakeGeocoder(), kanari=FakeArchiveKanari(archive), bluesky=bsky)
+    d = (day - timedelta(days=1)).date().isoformat(), (day + timedelta(days=1)).date().isoformat()
+    summary = replay("France", d[0], d[1], s, clients, Options(sources=("bluesky",), firms_check=False), echo=False)
+    assert summary["seeds"] == 1 and summary["tickets_created"] == 1, summary
+    assert bsky.calls[0][0] == ["Ville-A"] and bsky.calls[0][2]  # place search with an upper bound
+    t = s.tickets_with_sources()[0]
+    assert t["mode"] == "replay" and t["status"] == "Satellite overlap" and len(t["sources"]) == 2
+    assert t["satellite"]["lead"]["minutes_vs_kanari"] == 20
+    assert s.q("SELECT mode FROM runs")[0]["mode"] == "replay"
+    assert s.recent_tickets("2000-01-01") == []  # live runs never see replay tickets
+    assert any(e["step"] == "lead" for e in s.events_after(0))
+
+
+def test_replay_rejects_future_or_pre_archive_dates():
+    from incident_agents.pipeline import replay
+    s = Store(":memory:")
+    clients = Clients(llm=FakeLLM(), geocoder=FakeGeocoder(), kanari=FakeArchiveKanari([]))
+    today = NOW.date().isoformat()
+    assert "error" in replay("France", today, today, s, clients, Options(firms_check=False), echo=False)
+    assert "archive" in replay("France", "2026-07-01", "2026-07-02", s, clients, Options(firms_check=False),
+                               echo=False)["error"]
+
+
+def test_server_replay_needs_both_dates():
+    from fastapi.testclient import TestClient
+
+    from incident_agents.server import create_app
+    s, calls = Store(":memory:"), []
+    app = create_app(s, scheduler=False, runner=lambda *a, **k: None,
+                     replay_runner=lambda q, a, b, store: calls.append((q, str(a), str(b))))
+    c = TestClient(app)
+    assert c.post("/api/runs", json={"query": "France", "replay_from": "2026-08-25"}).status_code == 422
+    assert c.post("/api/runs", json={"query": "France", "replay_from": "2026-08-25",
+                                     "replay_to": "2026-08-27"}).json()["started"]
+    import time
+    time.sleep(0.2)
+    assert calls == [("France", "2026-08-25", "2026-08-27")]
