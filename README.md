@@ -84,8 +84,9 @@ explains the method. The API serves it: `http://localhost:8000/` (or the Render 
 yearly MODIS / VIIRS / harmonized totals across the 2012 switch, the typical year, the validation
 errors, the weather context, table views, and an **API log** with the raw JSON of every request.
 
-- Link parameters: `?area=bizerte&month=2008-07&theme=dark`, and `?api=https://<service>.onrender.com`
-  when the page is served from elsewhere.
+- Link parameters: `?area=bizerte&month=2008-07&theme=dark`, `?bbox=146,-38,153,-28` for any box
+  (minLon,minLat,maxLon,maxLat), and `?api=https://<service>.onrender.com` when the page is served
+  from elsewhere.
 - Offline: if the API is unreachable, the page reads `web/backup/*.json` and says so. To try it
   without the API: `python -m http.server -d web 8080`, then open `http://localhost:8080/demo/`.
 - It is a test and explanation page. The team's React app lives on the `frontend` branch and can

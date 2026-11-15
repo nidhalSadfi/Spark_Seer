@@ -233,6 +233,9 @@ function start() {
   if (!state.offline) sel.append(h("option", { value: "_bbox" }, "Custom bbox…"));
   if (!state.areas.length && !state.offline) { sel.value = "_bbox"; $("bbox-wrap").hidden = false; }
   if (state.areas.some((a) => a.id === params.get("area"))) sel.value = params.get("area");
+  if (params.get("bbox") && !state.offline) { // ?bbox=minLon,minLat,maxLon,maxLat: any place
+    sel.value = "_bbox"; $("bbox").value = params.get("bbox"); $("bbox-wrap").hidden = false;
+  }
   syntheticBanner();
   renderValidation();
   load();
