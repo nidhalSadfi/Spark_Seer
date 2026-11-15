@@ -46,7 +46,9 @@ function Fact({ fact, index }) {
   return (
     <Reveal delay={index * 0.08}>
       <div ref={ref} className="text-center">
-        <div className="text-4xl font-bold tabular-nums text-heat sm:text-5xl">
+        {/* Solid colour on purpose: NumberFlow draws its digits in a shadow DOM, where the gradient-clipped
+            transparent text of `.text-heat` does not paint, so the numbers would be invisible. */}
+        <div className="text-4xl font-bold tabular-nums text-fire-mid [text-shadow:0_0_28px_rgba(249,115,22,0.4)] sm:text-5xl">
           <NumberFlow
             value={seen ? fact.value : 0}
             suffix={fact.unit}
