@@ -55,6 +55,11 @@ MAX_ITER = 1  # per agent: the answer, nothing else (spec §7 free-tier budget)
 _HASH_FIELDS = ("fingerprint", "content_sha256", "file_sha256")
 _HEX_RUN = re.compile(r"\b[0-9a-f]{12,}\b")
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+# A world run affects tens of thousands of cell-months (spec §16). Listing them all would fill the
+# validation payload, which sorts "affected_keys" first, and push the gates and soft flags past
+# REVIEW_SUMMARY_MAX_CHARS. Above this many keys the payload gives their count and the first ones;
+# a verdict may still flag any affected key (validate_verdict checks the whole set).
+AFFECTED_KEYS_LISTED = 50
 
 Key = tuple[int, int, int, int]  # (cy, cx, year, month)
 LLMFactory = Callable[..., Any]  # (model, settings, *, timeout_s) -> crewai BaseLLM, like llm.build_llm
@@ -161,6 +166,15 @@ def _without_hashes(obj: Any) -> Any:
     return _HEX_RUN.sub("<hash>", obj) if isinstance(obj, str) else obj
 
 
+def _affected_keys_payload(affected_keys):
+    """All affected keys (sorted) up to AFFECTED_KEYS_LISTED, else their count and the first ones."""
+    keys = sorted(_key_set(affected_keys))
+    if len(keys) <= AFFECTED_KEYS_LISTED:
+        return keys
+    return {"count": len(keys), "listed": keys[:AFFECTED_KEYS_LISTED],
+            "note": "only the first keys are listed; the soft flags and gates list the keys they concern"}
+
+
 def review_payloads(result: ProcessingResult, affected_keys, max_chars: int) -> dict[str, str]:
     """The JSON text put into each reviewer's task prompt, from stage summaries, gates and soft flags only."""
     s = result.summary()
@@ -172,7 +186,7 @@ def review_payloads(result: ProcessingResult, affected_keys, max_chars: int) -> 
                           "availability": inputs["availability"], "harmonize": stages["harmonize"],
                           "completeness": stages["completeness"], "drift": stages["drift"]},
         "validation": {"gates_passed": s["passed"], "gates": s["gates"], "soft_flags": s["soft_flags"],
-                       "affected_keys": sorted(_key_set(affected_keys))},
+                       "affected_keys": _affected_keys_payload(affected_keys)},
     }
     return {name: _cap(_without_hashes(obj), max_chars) for name, obj in payloads.items()}
 
