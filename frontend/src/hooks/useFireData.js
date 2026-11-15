@@ -46,12 +46,23 @@ export function useCalendarRows() {
   return useCalendarQuery(calendarToRows)
 }
 
+/** Latest month with data (never a "none" month) vs. its historical median; `partial` marks an incomplete month. */
 function summarize(cal, area, sensor) {
   const mat = calendarToMatrix(cal, sensor)
   const last = latestObservation(mat)
+  if (!last) return { id: area.id, name: area.name, year: null, month: null, current: null, baseline: null, anomaly: null, partial: false }
   const current = mat.data[last.yearIdx][last.month]
   const baseline = historicalMedian(mat, last.year, last.month)
-  return { id: area.id, name: area.name, year: last.year, month: last.month, current, baseline, anomaly: anomalyPct(current, baseline) }
+  return {
+    id: area.id,
+    name: area.name,
+    year: last.year,
+    month: last.month,
+    current,
+    baseline,
+    anomaly: anomalyPct(current, baseline),
+    partial: last.partial,
+  }
 }
 
 const combineSummaries = (results) => ({

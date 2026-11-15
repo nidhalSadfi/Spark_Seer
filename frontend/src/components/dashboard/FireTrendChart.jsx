@@ -1,17 +1,24 @@
 import { useMemo } from 'react'
 import EChart, { axisStyle, tooltipStyle } from '../common/EChart'
 import { Skeleton } from '../ui/primitives'
-import { MONTHS, historicalMedian } from '../../utils/stats'
+import { MONTHS, historicalMedian, latestObservation } from '../../utils/stats'
 import { fmtInt } from '../../utils/format'
 
-/** Last 36 months of hotspot counts with the historical-median baseline overlaid. */
+/**
+ * Last 36 months up to the latest month with data, with the historical-median baseline overlaid.
+ * Months without data ("none" coverage) stay in the axis as gaps in the line, never as zeros.
+ */
 export default function FireTrendChart({ matrix, months = 36 }) {
   const option = useMemo(() => {
     if (!matrix) return null
+    const last = latestObservation(matrix)
     const points = []
+    let started = false
     matrix.years.forEach((y, yi) =>
       matrix.data[yi].forEach((v, m) => {
-        if (v != null) points.push({ y, m, v, base: historicalMedian(matrix, y, m) })
+        if (!last || yi > last.yearIdx || (yi === last.yearIdx && m > last.month)) return
+        started ||= v != null
+        if (started) points.push({ y, m, v, base: historicalMedian(matrix, y, m) })
       }),
     )
     const recent = points.slice(-months)
