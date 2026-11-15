@@ -29,14 +29,14 @@ export const investigate = ({ area, bbox, year, month }) =>
  * `data_end_year`, e.g. 2026 with the database), so the dashboard follows new near-real-time
  * months without a code change. The offline mock covers DATA_START_YEAR..DATA_END_YEAR (2025).
  */
-export async function getCalendar({ area, bbox, start = DATA_START_YEAR, end }) {
+export async function getCalendar({ area, bbox, all = false, start = DATA_START_YEAR, end }) {
   try {
     const cal = await apiGet('/calendar', { area, bbox: bbox?.join(','), start, end })
     return { ...cal, meta: { ...cal.meta, source: 'api' } }
   } catch (e) {
     if (!isUnavailable(e)) throw e // bad request (400): surface it, don't hide it behind mock data
     console.warn(`[EmberLedger] ${e.message} Showing offline sample data instead.`)
-    const cal = mockCalendar(area ?? `bbox:${bbox}`)
+    const cal = mockCalendar(all ? 'global' : (area ?? `bbox:${bbox}`))
     return { ...cal, meta: { ...cal.meta, source: 'mock', fallbackReason: e.message } }
   }
 }

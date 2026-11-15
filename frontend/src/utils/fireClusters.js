@@ -228,22 +228,139 @@ export const bboxBounds = (b) => [
   [b[3], b[2]],
 ]
 
+/** "VIIRS_NOAA20_NRT" → "VIIRS NOAA-20": a FIRMS source code as people read it. */
+export function feedSourceName(source) {
+  const s = String(source ?? '').toUpperCase()
+  if (s.startsWith('MODIS')) return 'MODIS (Terra, Aqua)'
+  if (s.includes('NOAA20')) return 'VIIRS NOAA-20'
+  if (s.includes('NOAA21')) return 'VIIRS NOAA-21'
+  if (s.includes('NPP')) return 'VIIRS S-NPP'
+  return source ? String(source) : 'Unknown source'
+}
+
+/** The view for "everything": the inhabited latitudes, all longitudes. */
+export const WORLD_BOUNDS = [
+  [-58, -170],
+  [75, 170],
+]
+
+/** Bounds around a set of points, padded a little (at least ~1° across); null for none. */
+export function pointsBounds(points) {
+  if (!points.length) return null
+  let s = Infinity
+  let w = Infinity
+  let n = -Infinity
+  let e = -Infinity
+  for (const p of points) {
+    s = Math.min(s, p.lat)
+    n = Math.max(n, p.lat)
+    w = Math.min(w, p.lon)
+    e = Math.max(e, p.lon)
+  }
+  const pad = (a, b) => Math.max(0.5, (b - a) * 0.08)
+  const py = pad(s, n)
+  const px = pad(w, e)
+  return [
+    [Math.max(-85, s - py), Math.max(-180, w - px)],
+    [Math.min(85, n + py), Math.min(180, e + px)],
+  ]
+}
+
+/**
+ * Grid answer of GET /fires/live (mode "grid": a large window or a wide box) → map fires, one per
+ * occupied cell. A cell is an aggregate of the window's detections, so it has counts, FRP totals
+ * and the latest detection time, but no passes, satellites or confidence: `grid: true` tells the
+ * panels to show only what a cell carries. With a raw sensor only that sensor's detections count.
+ */
+export function fireFromCell(cell, { resolution, sensor = 'harmonized', windowStart = null, region = null, areas = [] } = {}) {
+  const lat = finite(cell?.lat)
+  const lon = finite(cell?.lon)
+  const latest = Date.parse(cell?.latest)
+  if (lat == null || lon == null) return null
+  const modis = finite(cell.modis) ?? 0
+  const viirs = finite(cell.viirs) ?? Math.max(0, (finite(cell.count) ?? 0) - modis)
+  const count = sensor === 'modis' ? modis : sensor === 'viirs' ? viirs : (finite(cell.count) ?? modis + viirs)
+  if (count <= 0) return null
+  // FRP is summed over both sensors by the API, so it is only meaningful for the harmonized view
+  const both = sensor !== 'modis' && sensor !== 'viirs'
+  const frpSum = both ? finite(cell.frp_sum) : null
+  const area = areas.find((a) => inBbox(a.bbox, lat, lon))
+  const last = Number.isFinite(latest) ? latest : null
+  return {
+    id: `cell-${lat.toFixed(3)}_${lon.toFixed(3)}`,
+    grid: true,
+    resolution: finite(resolution),
+    region,
+    name: `Fire activity ${fmtDeg(lat, 'N', 'S')}, ${fmtDeg(lon, 'E', 'W')}`,
+    place: area?.name ?? null,
+    lat: +lat.toFixed(4),
+    lon: +lon.toFixed(4),
+    frp: frpSum == null ? null : round1(frpSum),
+    frpDelta: null,
+    frpMax: both ? round1(finite(cell.frp_max)) : null,
+    frpTotal: frpSum == null ? null : round1(frpSum),
+    lastPass: { t: last, sat: null, daynight: null },
+    prevPass: null,
+    // a cell has no first-detection time: it shows for the whole window
+    firstDetected: windowStart ?? last,
+    lastDetected: last,
+    detections24h: { viirs: sensor === 'modis' ? 0 : viirs, modis: sensor === 'viirs' ? 0 : modis },
+    count,
+    persistence: null,
+    confidence: null,
+    satellites: [],
+    passes: [],
+    fwi: null,
+    weather: null,
+    hourly: null,
+    burnedHa: null,
+    spread: null,
+    landCover: null,
+  }
+}
+
 /**
  * The whole GET /fires/live response → the map feed:
  *   { fires, detections, snapshot, window, chartRange, bounds, meta }
  * Times are epoch ms. With a raw sensor ('modis' | 'viirs') only its detections are clustered.
  */
 export function liveFeed(res, { sensor = 'harmonized', bbox, region = null, areas = [] } = {}) {
-  let detections = toFeedDetections(res?.detections)
-  if (sensor === 'modis' || sensor === 'viirs') detections = detections.filter((d) => d.sensor === sensor)
-
-  const fires = clusterDetections(detections)
-    .map((c) => fireFromCluster(c, { region, areas }))
-    .sort((a, b) => (b.frp ?? -1) - (a.frp ?? -1) || b.count - a.count)
-
-  const latest = detections.length ? Math.max(...detections.map((d) => d.t)) : null
-  const end = Date.parse(res?.window?.end) || latest || Date.parse(res?.snapshot) || Date.now()
+  const grid = res?.mode === 'grid'
   const hours = finite(res?.meta?.hours) ?? 24
+  const resolution = finite(res?.meta?.resolution)
+  let detections = []
+  let fires
+  let latest = null
+
+  if (grid) {
+    const winEnd = Date.parse(res?.window?.end) || Date.parse(res?.snapshot) || Date.now()
+    const winStart = Date.parse(res?.window?.start) || winEnd - hours * 3600000
+    fires = (res?.cells ?? [])
+      .map((c) => fireFromCell(c, { resolution, sensor, windowStart: winStart, region, areas }))
+      .filter(Boolean)
+    latest = fires.length ? Math.max(...fires.map((f) => f.lastDetected ?? -Infinity)) : null
+    // the glow layer draws one soft spot per cell, as bright as the cell is busy
+    detections = fires.map((f) => ({
+      id: f.id,
+      lat: f.lat,
+      lon: f.lon,
+      t: f.lastDetected ?? winEnd,
+      sensor: f.detections24h.modis > f.detections24h.viirs ? 'modis' : 'viirs',
+      sat: null,
+      frp: f.frpTotal ?? f.count,
+      confidence: null,
+      daynight: null,
+      fireId: f.id,
+    }))
+  } else {
+    detections = toFeedDetections(res?.detections)
+    if (sensor === 'modis' || sensor === 'viirs') detections = detections.filter((d) => d.sensor === sensor)
+    fires = clusterDetections(detections).map((c) => fireFromCluster(c, { region, areas }))
+    latest = detections.length ? Math.max(...detections.map((d) => d.t)) : null
+  }
+  fires.sort((a, b) => (b.frp ?? -1) - (a.frp ?? -1) || b.count - a.count)
+
+  const end = Date.parse(res?.window?.end) || latest || Date.parse(res?.snapshot) || Date.now()
   const start = Date.parse(res?.window?.start) || end - hours * 3600000
   const snapshot = Date.parse(res?.snapshot) || end
   const box = bbox ?? res?.meta?.bbox ?? null
@@ -254,7 +371,9 @@ export function liveFeed(res, { sensor = 'harmonized', bbox, region = null, area
     snapshot,
     window: { start, end },
     chartRange: { start, end }, // no forecast in the satellite feed
-    bounds: box ? bboxBounds(box) : null,
+    // no box (All areas): frame what was found, or the whole world when nothing was
+    bounds: box ? bboxBounds(box) : (pointsBounds(fires) ?? WORLD_BOUNDS),
+    mode: grid ? 'grid' : 'detections',
     meta: {
       source: 'api',
       region,
@@ -264,7 +383,9 @@ export function liveFeed(res, { sensor = 'harmonized', bbox, region = null, area
       product: res?.meta?.product ?? 'NRT',
       hours,
       bbox: box,
-      count: res?.meta?.count ?? detections.length,
+      // grid: the detections the cells hold (for the chosen sensor); otherwise what the API counted
+      count: grid ? sum(fires.map((f) => f.count)) : (res?.meta?.count ?? detections.length),
+      resolution: grid ? resolution : null,
       sources: (res?.sources ?? []).map((s) => ({ source: s.source, maxAcqDate: s.max_acq_date ?? null })),
     },
   }

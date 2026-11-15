@@ -12,8 +12,8 @@ import { fmtUtc } from '../components/map/mapConfig'
 import { useActiveFires } from '../hooks/useFireData'
 import { useReports } from '../hooks/useReports'
 import { notifyReportError } from '../components/reports/notifyError'
-import { API_BASE } from '../services/http'
 import { LIVE_WINDOW_H } from '../services/constants'
+import { feedSourceName } from '../utils/fireClusters'
 
 /** When the newest stored detection is older than this, say the feed is behind. */
 const STALE_H = 12
@@ -30,9 +30,9 @@ function FeedNotice({ data, error }) {
   if (!data) return null
   if (data.meta.source === 'mock') {
     return (
-      <Notice icon={AlertTriangle} title="Illustrative data: the live fire feed is unavailable.">
-        {data.meta.fallbackReason ? `${data.meta.fallbackReason} ` : ''}The fires below are generated sample values (names, FRP, weather
-        and FWI included), not MODIS or VIIRS detections. Start the backend at {API_BASE}, or set VITE_API_URL, and reload.
+      <Notice icon={AlertTriangle} title="Sample data: the live fire feed is not available right now.">
+        The fires below are generated examples (names, fire power, weather and FWI included), not real MODIS or VIIRS detections. Real
+        detections appear here as soon as the feed is back.
       </Notice>
     )
   }
@@ -40,10 +40,12 @@ function FeedNotice({ data, error }) {
   const sources = data.meta.sources?.filter((s) => s.maxAcqDate) ?? []
   return (
     <Notice icon={Database} tone="info" title="Source.">
-      NASA FIRMS near-real-time detections (MODIS and VIIRS 375 m), the {LIVE_WINDOW_H} h up to the newest stored detection, grouped in the
-      browser into clusters of hotspots a few kilometres apart. A cluster is not necessarily one wildfire. Fire weather, burned area and
-      place names are not part of this feed.
-      {sources.length > 0 && <> Latest data per source: {sources.map((s) => `${s.source} ${s.maxAcqDate}`).join(' · ')}.</>}
+      NASA FIRMS near-real-time detections (MODIS and VIIRS 375 m), the {LIVE_WINDOW_H} h up to the newest detection,{' '}
+      {data.mode === 'grid'
+        ? `summed per ${data.meta.resolution ?? ''}° square because the view is wide. Pick one area, or draw one, to see individual fires.`
+        : 'grouped into clusters of hotspots a few kilometres apart. A cluster is not necessarily one wildfire.'}{' '}
+      Fire weather, burned area and place names are not part of this feed.
+      {sources.length > 0 && <> Latest data: {sources.map((s) => `${feedSourceName(s.source)} ${s.maxAcqDate}`).join(' · ')}.</>}
       {ageH > STALE_H && (
         <b className="font-semibold text-yellow-200"> The newest stored detection is {Math.round(ageH)} h old: the feed is behind.</b>
       )}{' '}
@@ -98,7 +100,7 @@ export default function FireMapPage() {
       setSelected(created.id)
       setReportMode(false)
       setDraft(null)
-      const where = reportsSource === 'local' ? ' It is saved in this browser only: the reports server is unreachable.' : ''
+      const where = reportsSource === 'local' ? ' It is saved in this browser only for now, because the shared report list is not available.' : ''
       toast.success(`Alert filed as unverified (?). Someone has to confirm it before it counts as a fire.${where}`, {
         action: { label: 'Review', onClick: () => navigate(`/dashboard/reports?report=${encodeURIComponent(created.id)}`) },
       })
@@ -122,7 +124,7 @@ export default function FireMapPage() {
               <span className="size-1.5 rounded-full bg-fire" aria-hidden /> Live feed unavailable · sample fires
             </Badge>
           ) : (
-            <Badge tone="ok" title="Time of the newest detection stored by the backend">
+            <Badge tone="ok" title="Time of the newest satellite detection">
               <span className="size-1.5 rounded-full bg-ok" aria-hidden /> Latest detection {fmtUtc(data.window.end)}
             </Badge>
           ))
@@ -147,7 +149,7 @@ export default function FireMapPage() {
             onSelect={select}
             emptyText={
               data && !fires.length
-                ? `No active fires detected in this area in the last ${LIVE_WINDOW_H} h. Draw a wider area, or pick another region.`
+                ? `No active fires detected in this area in the last ${LIVE_WINDOW_H} h. Draw a wider area, or pick another one in the Area menu.`
                 : undefined
             }
             className={side}
@@ -165,7 +167,8 @@ export default function FireMapPage() {
             focus={focus}
           />
         </div>
-        {!report && !reportMode && (
+        {/* a grid cell (wide views) has no satellite passes to chart */}
+        {!report && !reportMode && !fire?.grid && (
           <Card className="p-0!">
             <FirePassChart fire={fire} range={data?.chartRange} now={data?.meta.source === 'api' ? data.window.end : data?.snapshot} />
           </Card>

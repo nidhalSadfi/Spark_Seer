@@ -486,7 +486,8 @@ export async function mockActiveFires({ region = 'global', sensor = 'harmonized'
  * Near-real-time active fires for the map, from GET /fires/live.
  *
  *   region  id of the selected named area (only used for naming and map fitting)
- *   bbox    [minLon, minLat, maxLon, maxLat] to query; defaults to the whole FIRMS region
+ *   bbox    [minLon, minLat, maxLon, maxLat] to query; defaults to the whole FIRMS region; null asks for
+ *           everything (All areas; the API may then answer with a grid of cells, see liveFeed)
  *   areas   [{id, name, bbox}] so a cluster can say which study area it lies in
  *
  * Resolves to { fires, detections, snapshot, window, chartRange, bounds, meta } with
@@ -494,14 +495,15 @@ export async function mockActiveFires({ region = 'global', sensor = 'harmonized'
  */
 export async function getActiveFires({ region = null, bbox = FIRMS_BBOX, sensor = 'harmonized', areas = [] } = {}) {
   try {
-    const res = await apiGet('/fires/live', { hours: LIVE_WINDOW_H, bbox: bbox.join(',') })
+    // no bbox (All areas): the API answers for everything it holds
+    const res = await apiGet('/fires/live', { hours: LIVE_WINDOW_H, bbox: bbox ? bbox.join(',') : undefined })
     const feed = liveFeed(res, { sensor, bbox, region, areas })
     return { ...feed, meta: { ...feed.meta, fetchedAt: Date.now() } }
   } catch (e) {
     // 404: a backend deployed before the endpoint existed. Same as unreachable for this feed.
     const missing = e instanceof ApiError && e.status === 404
     if (!isUnavailable(e) && !missing) throw e // bad request (400): surface it
-    const reason = missing ? 'This API has no /fires/live endpoint yet.' : e.message
+    const reason = missing ? 'The live fire feed is not available yet.' : e.message
     console.warn(`[EmberLedger] Live fires: ${reason} Showing illustrative sample fires instead.`)
     const mock = await mockActiveFires({ region: region ?? 'global', sensor })
     return { ...mock, meta: { ...mock.meta, fallbackReason: reason } }

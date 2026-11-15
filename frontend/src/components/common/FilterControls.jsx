@@ -2,7 +2,7 @@ import { motion } from 'motion/react'
 import { X } from 'lucide-react'
 import { useFilters } from '../../context/FilterContext'
 import { DATA_RANGE } from '../../services/fireApi'
-import { SENSORS } from '../../services/constants'
+import { ALL_AREAS, AREA_GROUPS, SENSORS } from '../../services/constants'
 import { Select } from '../ui/primitives'
 
 export function SensorSelector() {
@@ -47,7 +47,12 @@ export function RegionSelector() {
       label="Area"
       value={aoi ? '' : region}
       onChange={(v) => v && setRegion(v)}
-      options={[...(aoi ? [{ value: '', label: 'Custom area (map)' }] : []), ...areas.map((a) => ({ value: a.id, label: a.name }))]}
+      options={[
+        ...(aoi ? [{ value: '', label: 'Custom area (map)' }] : []),
+        { value: ALL_AREAS, label: 'All areas' },
+        // grouped under a heading when the API says which group an area belongs to
+        ...areas.map((a) => ({ value: a.id, label: a.name, group: AREA_GROUPS[a.group] ?? (a.group ? a.group : undefined) })),
+      ]}
     />
   )
 }

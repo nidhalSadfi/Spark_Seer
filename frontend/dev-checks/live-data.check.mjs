@@ -3,7 +3,18 @@
 // Run from frontend/:  node dev-checks/live-data.check.mjs
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { clusterDetections, confidenceLevel, groupPasses, liveFeed, satelliteName, toFeedDetections } from '../src/utils/fireClusters.js'
+import {
+  WORLD_BOUNDS,
+  clusterDetections,
+  confidenceLevel,
+  feedSourceName,
+  fireFromCell,
+  groupPasses,
+  liveFeed,
+  pointsBounds,
+  satelliteName,
+  toFeedDetections,
+} from '../src/utils/fireClusters.js'
 import { createBody, reportFromApi, reportsFromApi } from '../src/utils/reportMapping.js'
 
 const sample = JSON.parse(readFileSync(new URL('./fires-live.sample.json', import.meta.url)))
@@ -59,7 +70,8 @@ check('passes group one satellite overpass and sum its FRP', () => {
 
 check('feed shape and fire fields derived from detections', () => {
   const feed = liveFeed(sample, { bbox: [8.3, 36.0, 9.8, 37.2], region: 'bizerte', areas })
-  assert.deepEqual(Object.keys(feed).sort(), ['bounds', 'chartRange', 'detections', 'fires', 'meta', 'snapshot', 'window'])
+  assert.deepEqual(Object.keys(feed).sort(), ['bounds', 'chartRange', 'detections', 'fires', 'meta', 'mode', 'snapshot', 'window'])
+  assert.equal(feed.mode, 'detections')
   assert.equal(feed.meta.source, 'api')
   assert.deepEqual(feed.window, { start: ms('2026-11-14T12:01:00Z'), end: ms('2026-11-15T12:01:00Z') })
   assert.deepEqual(feed.bounds, [[36.0, 8.3], [37.2, 9.8]])
@@ -120,6 +132,69 @@ check('report API → UI mapping', () => {
   const list = reportsFromApi({ reports: [api, { ...api, id: 'new', createdAt: '2026-11-15T09:00:00Z' }, { bad: true }] })
   assert.deepEqual(list.map((r) => r.id), ['new', 'a1b2'])
   assert.deepEqual(createBody({ lat: 1, lon: 2, observed: 'both', note: `  ${'x'.repeat(300)}  ` }).note.length, 280)
+})
+
+// A grid answer (backend/api/fires.py, mode "grid": a large window, a wide box, or mode=grid). SYNTHETIC values.
+const gridRes = {
+  mode: 'grid',
+  snapshot: '2026-11-15T12:05:00Z',
+  window: { start: '2026-11-14T12:01:00Z', end: '2026-11-15T12:01:00Z' },
+  detections: [],
+  cells: [
+    { lat: 36.875, lon: 9.125, count: 12, frp_sum: 85.4, frp_max: 22.0, modis: 2, viirs: 10, latest: '2026-11-15T11:40:00Z' },
+    { lat: -8.25, lon: -55.75, count: 40, frp_sum: 610.2, frp_max: 95.5, modis: 0, viirs: 40, latest: '2026-11-15T04:10:00Z' },
+    { lat: 61.75, lon: 118.25, count: 3, frp_sum: null, frp_max: null, modis: 3, viirs: 0, latest: '2026-11-14T22:00:00Z' },
+    { lat: null, lon: 10, count: 5, modis: 5, viirs: 0, latest: '2026-11-15T01:00:00Z' }, // no position: dropped
+  ],
+  sources: [],
+  meta: { count: 60, product: 'NRT', hours: 24, bbox: null, resolution: 0.5, cells: 4 },
+}
+
+check('grid answer → one fire per cell, strongest first, framed when there is no box', () => {
+  const feed = liveFeed(gridRes, { areas })
+  assert.equal(feed.mode, 'grid')
+  assert.equal(feed.meta.resolution, 0.5)
+  assert.deepEqual(feed.fires.map((f) => f.count), [40, 12, 3])
+  const [amazon, bizerte] = feed.fires
+  assert.equal(amazon.grid, true)
+  assert.equal(amazon.frp, 610.2)
+  assert.equal(amazon.frpMax, 95.5)
+  assert.deepEqual(amazon.detections24h, { viirs: 40, modis: 0 })
+  assert.equal(amazon.firstDetected, ms('2026-11-14T12:01:00Z')) // a cell shows for the whole window
+  assert.equal(amazon.lastDetected, ms('2026-11-15T04:10:00Z'))
+  assert.deepEqual(amazon.passes, [])
+  assert.equal(bizerte.place, 'Bizerte / NW Tunisia')
+  assert.equal(feed.detections.length, 3) // one glow spot per cell
+  assert.equal(feed.meta.count, 55)
+  // no box: the view frames the cells found (with a margin), inside the world
+  const [[s, w], [nn, e]] = feed.bounds
+  assert.ok(s < -8.25 && nn > 61.75 && w < -55.75 && e > 118.25 && s >= -85 && nn <= 85 && w >= -180 && e <= 180)
+})
+
+check('grid with a raw sensor counts only that sensor and drops FRP (summed over both sensors)', () => {
+  const modis = liveFeed(gridRes, { sensor: 'modis' })
+  assert.deepEqual(modis.fires.map((f) => f.count), [3, 2]) // the VIIRS-only Amazon cell disappears
+  assert.ok(modis.fires.every((f) => f.frp == null && f.detections24h.viirs === 0))
+  const viirs = liveFeed(gridRes, { sensor: 'viirs' })
+  assert.deepEqual(viirs.fires.map((f) => f.count).sort((a, b) => b - a), [40, 10])
+  assert.equal(fireFromCell({ lat: 1, lon: 1, count: 0, modis: 0, viirs: 0 }, {}), null)
+})
+
+check('no box and nothing found: the world view; a detections answer still frames by its box', () => {
+  assert.deepEqual(liveFeed({ ...gridRes, cells: [] }).bounds, WORLD_BOUNDS)
+  assert.deepEqual(liveFeed({ detections: [], meta: { bbox: [8, 36, 10, 38] } }).bounds, [[36, 8], [38, 10]])
+  assert.equal(pointsBounds([]), null)
+  const one = pointsBounds([{ lat: 36.9, lon: 9.1 }])
+  assert.ok(one[1][0] - one[0][0] >= 1 && one[1][1] - one[0][1] >= 1) // a single point still gets ~1° around it
+})
+
+check('FIRMS source codes read as satellite names', () => {
+  assert.equal(feedSourceName('VIIRS_NOAA20_NRT'), 'VIIRS NOAA-20')
+  assert.equal(feedSourceName('VIIRS_NOAA21_NRT'), 'VIIRS NOAA-21')
+  assert.equal(feedSourceName('VIIRS_SNPP_NRT'), 'VIIRS S-NPP')
+  assert.equal(feedSourceName('MODIS_NRT'), 'MODIS (Terra, Aqua)')
+  assert.equal(feedSourceName('SOMETHING_NEW'), 'SOMETHING_NEW')
+  assert.equal(feedSourceName(null), 'Unknown source')
 })
 
 console.log(`\n${n} checks passed`)

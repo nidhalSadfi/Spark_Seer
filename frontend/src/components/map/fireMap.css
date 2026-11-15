@@ -8,6 +8,10 @@
 .sg-basemap {
   filter: brightness(0.8) contrast(1.12) saturate(0.9);
 }
+/* satellite imagery, a little darker so the fire glow and markers stay readable on bright ground */
+.sg-imagery {
+  filter: brightness(0.78) saturate(0.9);
+}
 .sg-map .leaflet-control-attribution {
   background: rgba(11, 18, 32, 0.72) !important;
   color: #7c8ca3 !important;

@@ -13,7 +13,7 @@ import {
   getWeather,
   investigate,
 } from '../services/emberApi'
-import { FIRMS_BBOX } from '../services/constants'
+import { ALL_AREAS, FIRMS_BBOX } from '../services/constants'
 import { anomalyPct, historicalMedian, latestObservation } from '../utils/stats'
 
 const opts = { staleTime: 5 * 60 * 1000, placeholderData: (prev) => prev }
@@ -90,12 +90,16 @@ export function useValidation() {
   return useQuery({ queryKey: ['validation'], queryFn: getValidation, staleTime: 30 * 60 * 1000, retry: false })
 }
 
-/** 3-day weather context. The endpoint is keyed by named area, so an AOI falls back to the selected area. */
+/**
+ * 3-day weather context. The endpoint is keyed by named area, so an AOI falls back to the selected area,
+ * and All areas has none (the query does not run; WeatherCard asks for one area).
+ */
 export function useWeather() {
   const { region } = useFilters()
   return useQuery({
     queryKey: ['weather', region],
     queryFn: () => getWeather(region),
+    enabled: region !== ALL_AREAS,
     staleTime: 30 * 60 * 1000,
     retry: false,
   })
@@ -152,9 +156,10 @@ export function useDataMode() {
  */
 export function useActiveFires() {
   const { target, areas, sensor } = useFilters()
-  const bbox = target.bbox ?? areas.find((a) => a.id === target.area)?.bbox ?? FIRMS_BBOX
+  // All areas: no box at all, so the API answers for everything it holds (as a grid when that is a lot)
+  const bbox = target.all ? null : (target.bbox ?? areas.find((a) => a.id === target.area)?.bbox ?? FIRMS_BBOX)
   return useQuery({
-    queryKey: ['active-fires', bbox.join(','), sensor],
+    queryKey: ['active-fires', bbox ? bbox.join(',') : 'all', sensor],
     queryFn: () => getActiveFires({ region: target.area ?? null, bbox, sensor, areas }),
     ...opts,
     // the backend polls FIRMS every few hours; a 10-minute refresh picks new passes up soon enough

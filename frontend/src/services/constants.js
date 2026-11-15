@@ -12,11 +12,18 @@ export const sensorLabel = (id) => SENSORS.find((s) => s.id === id)?.label ?? id
  * bbox = [minLon, minLat, maxLon, maxLat].
  */
 export const FALLBACK_AREAS = [
-  { id: 'bizerte', name: 'Bizerte', bbox: [9.0, 36.8, 10.3, 37.4] },
-  { id: 'nw_tunisia', name: 'Northwest Tunisia', bbox: [8.3, 36.2, 9.2, 37.0] },
-  { id: 'kabylie', name: 'Kabylie', bbox: [3.7, 36.3, 5.2, 37.0] },
-  { id: 'ne_algeria', name: 'Northeast Algeria', bbox: [7.0, 36.4, 8.6, 37.0] },
+  { id: 'bizerte', name: 'Bizerte / NW Tunisia', bbox: [8.3, 36.0, 9.8, 37.2], group: 'north_africa' },
+  { id: 'kabylie', name: 'Kabylie', bbox: [3.7, 36.3, 5.2, 37.0], group: 'north_africa' },
+  { id: 'ne_algeria', name: 'NE Algeria', bbox: [7.0, 36.4, 8.6, 37.0], group: 'north_africa' },
+  { id: 'petite_kabylie', name: 'Petite Kabylie', bbox: [5.3, 36.4, 6.9, 37.1], group: 'north_africa' },
 ]
+
+/** The "All areas" choice of the Area menu: everything the data covers, as one whole-world box. */
+export const ALL_AREAS = 'all'
+export const WORLD_BBOX = [-180, -90, 180, 90]
+
+/** Headings for the `group` field of GET /areas in the Area menu. */
+export const AREA_GROUPS = { north_africa: 'Tunisia and Algeria', world: 'World' }
 
 /** Outline of a "partial" calendar month (near-real-time, still being observed); yellow-300. */
 export const PARTIAL_BORDER = '#fde047'

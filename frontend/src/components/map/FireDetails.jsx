@@ -22,6 +22,93 @@ export function Tile({ icon: Icon, value, label }) {
 const mw = (v) => (v == null ? 'unknown' : `${Math.round(v)} MW`)
 const CONFIDENCE = { high: ['ok', 'High'], nominal: ['neutral', 'Nominal'], low: ['warn', 'Low'] }
 
+function OtherFires({ fire, fires, onSelect }) {
+  const others = fires.filter((f) => f.id !== fire.id).slice(0, 4)
+  if (!others.length) return null
+  const maxFrp = Math.max(1, ...fires.map((f) => f.frp ?? 0))
+  return (
+    <Section className="mt-2.5 pb-0">
+      <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">{fire.grid ? 'Other busy cells' : 'Other fires · by FRP'}</p>
+      <ul className="flex flex-col gap-1.5">
+        {others.map((f) => (
+          <li key={f.id}>
+            <button
+              type="button"
+              onClick={() => onSelect?.(f.id)}
+              className="relative flex w-full items-center justify-between overflow-hidden rounded-lg bg-sidebar/70 px-3 py-2 text-left text-[12.5px] hover:bg-card-hi"
+            >
+              <span
+                className="absolute inset-y-0 left-0 bg-gradient-to-r from-fire/25 to-fire/5"
+                style={{ width: `${((f.frp ?? 0) / maxFrp) * 100}%` }}
+                aria-hidden
+              />
+              <span className="relative truncate font-medium text-ink">{f.name}</span>
+              <span className="relative ml-2 shrink-0 font-mono text-[11.5px] text-fire-mid">
+                {f.grid && f.frp == null ? `${fmtInt(f.count)} det.` : mw(f.frp)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
+/**
+ * A grid cell (wide views: the API sums the window's detections per cell). It has counts, FRP totals and
+ * the latest detection, but no satellite passes, so it says how to see the individual fires.
+ */
+function CellDetails({ fire, fires, onSelect, className }) {
+  const km = fire.resolution ? Math.round(fire.resolution * 111) : null
+  return (
+    <aside className={`${panel} ${className}`} aria-label="Selected fire activity">
+      <div className="flex items-start gap-2.5 rounded-xl border border-line bg-sidebar/70 px-3 py-2.5">
+        <MapPin className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-semibold text-ink">{fire.name}</p>
+          {fire.place && <p className="text-xs text-muted">{fire.place}</p>}
+          <p className="font-mono text-[11px] text-faint">{fmtCoord(fire.lat, fire.lon)}</p>
+        </div>
+      </div>
+      {fire.lastDetected != null && (
+        <p className="mt-2.5 px-0.5 text-[11.5px] text-faint">
+          Latest detection <span className="text-muted">{fmtUtc(fire.lastDetected)}</span>
+        </p>
+      )}
+
+      <Section className="mt-3">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[32px] font-bold leading-none tracking-tight text-ink">{fmtInt(fire.count)}</span>
+          <span className="text-sm font-semibold text-muted">detections</span>
+          <span className="text-xs text-faint">last 24 h</span>
+        </div>
+        <p className="mt-1.5 text-xs text-muted">
+          {fire.detections24h.viirs} VIIRS · {fire.detections24h.modis} MODIS
+          {km && ` · in a ${fire.resolution}° square (about ${km} km)`}
+        </p>
+      </Section>
+
+      <Section>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12.5px]">
+          <dt className="text-muted">Total fire power</dt>
+          <dd className="text-right font-medium text-sky-300">{mw(fire.frpTotal)}</dd>
+          <dt className="text-muted">Strongest pixel</dt>
+          <dd className="text-right font-medium text-sky-300">{mw(fire.frpMax)}</dd>
+        </dl>
+      </Section>
+
+      <Section>
+        <p className="text-xs leading-relaxed text-muted">
+          Wide views show fire activity per square. Pick one area in the Area menu, or draw an area on the map, to see the individual fires
+          and their satellite passes.
+        </p>
+      </Section>
+
+      <OtherFires fire={fire} fires={fires} onSelect={onSelect} />
+    </aside>
+  )
+}
+
 /**
  * Left-hand panel of the map page: everything known about the selected fire.
  *
@@ -38,14 +125,13 @@ export default function FireDetails({ fire, fires = [], onSelect, emptyText, cla
       </aside>
     )
   }
+  if (fire.grid) return <CellDetails fire={fire} fires={fires} onSelect={onSelect} className={className} />
 
   const cls = fire.fwi != null ? fwiClass(fire.fwi) : null
   const localHour = (((fire.lastPass.t / 3600000 + fire.lon / 15) % 24) + 24) % 24
   // FIRMS says day or night per detection; the solar-hour guess is only for the mock feed
   const dayPass = fire.lastPass.daynight ? fire.lastPass.daynight === 'D' : localHour >= 6 && localHour < 18
   const [confTone, confLabel] = CONFIDENCE[fire.confidence] ?? ['neutral', 'Unknown']
-  const others = fires.filter((f) => f.id !== fire.id).slice(0, 4)
-  const maxFrp = Math.max(1, ...fires.map((f) => f.frp ?? 0))
   const up = (fire.frpDelta ?? 0) >= 0
 
   return (
@@ -176,30 +262,7 @@ export default function FireDetails({ fire, fires = [], onSelect, emptyText, cla
         </div>
       )}
 
-      {others.length > 0 && (
-        <Section className="mt-2.5 pb-0">
-          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">Other fires · by FRP</p>
-          <ul className="flex flex-col gap-1.5">
-            {others.map((f) => (
-              <li key={f.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect?.(f.id)}
-                  className="relative flex w-full items-center justify-between overflow-hidden rounded-lg bg-sidebar/70 px-3 py-2 text-left text-[12.5px] hover:bg-card-hi"
-                >
-                  <span
-                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-fire/25 to-fire/5"
-                    style={{ width: `${((f.frp ?? 0) / maxFrp) * 100}%` }}
-                    aria-hidden
-                  />
-                  <span className="relative truncate font-medium text-ink">{f.name}</span>
-                  <span className="relative ml-2 shrink-0 font-mono text-[11.5px] text-fire-mid">{mw(f.frp)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
+      <OtherFires fire={fire} fires={fires} onSelect={onSelect} />
     </aside>
   )
 }

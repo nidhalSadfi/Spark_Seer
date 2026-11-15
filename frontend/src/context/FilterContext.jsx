@@ -2,16 +2,18 @@ import { createContext, useContext, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { DATA_RANGE } from '../services/fireApi'
 import { getAreas, getHealth } from '../services/emberApi'
-import { FALLBACK_AREAS } from '../services/constants'
+import { ALL_AREAS, FALLBACK_AREAS, WORLD_BBOX } from '../services/constants'
 import { bboxOf } from '../utils/geo'
 
 /**
  * Global filter state, preserved across pages.
  *
- *  - `region`   id of a named area from GET /areas (placeholder list until the API answers)
+ *  - `region`   id of a named area from GET /areas (placeholder list until the API answers), or
+ *               ALL_AREAS ('all'): everything the data covers
  *  - `aoi`      GeoJSON feature drawn on the map; when set it overrides `region` and the
  *               pages query the API by bbox instead
- *  - `target`   what the data hooks send to the API: { area } or { bbox }, plus a stable `key`
+ *  - `target`   what the data hooks send to the API: { area } or { bbox }, plus a stable `key` and a
+ *               `name`; `all: true` for All areas (a whole-world bbox; the map asks for no box at all)
  *  - `sensor`, `startYear`, `endYear`
  *  - `dataEndYear` last year with data: GET /health `data_end_year` (the API's default calendar
  *               end, e.g. 2026 with the database). DATA_RANGE.endYear (2025) only while /health
@@ -42,14 +44,16 @@ export function FilterProvider({ children }) {
   const endYear = pickedEndYear ?? dataEndYear
 
   const value = useMemo(() => {
-    const activeRegion = areas.some((a) => a.id === region) ? region : areas[0].id
+    const activeRegion = region === ALL_AREAS || areas.some((a) => a.id === region) ? region : areas[0].id
     const aoiBbox = aoi ? bboxOf(aoi) : null
     const target = aoiBbox
       ? { bbox: aoiBbox, key: `bbox:${aoiBbox.join(',')}`, name: 'Custom area' }
-      : { area: activeRegion, key: `area:${activeRegion}`, name: areas.find((a) => a.id === activeRegion)?.name ?? activeRegion }
+      : activeRegion === ALL_AREAS
+        ? { all: true, bbox: WORLD_BBOX, key: ALL_AREAS, name: 'All areas' }
+        : { area: activeRegion, key: `area:${activeRegion}`, name: areas.find((a) => a.id === activeRegion)?.name ?? activeRegion }
     return {
       areas,
-      areaName: (id) => areas.find((a) => a.id === id)?.name ?? id,
+      areaName: (id) => (id === ALL_AREAS ? 'All areas' : (areas.find((a) => a.id === id)?.name ?? id)),
       region: activeRegion,
       // picking a named area replaces any AOI drawn on the map
       setRegion: (id) => {

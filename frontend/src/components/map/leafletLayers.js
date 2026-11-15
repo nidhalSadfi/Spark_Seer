@@ -5,8 +5,60 @@ const ATTRIBUTION = 'Basemap © <a href="https://www.esri.com">Esri</a>, HERE, G
 
 export const AOI_STYLE = { color: '#fb923c', weight: 2, dashArray: '6 5', fillColor: '#f97316', fillOpacity: 0.07 }
 
-/** Dark Esri basemap (no API key needed) with labels in their own pane above the data layers. */
-export function createBaseMap(el, { interactive = true } = {}) {
+const ESRI_SERVICES = 'https://server.arcgisonline.com/ArcGIS/rest/services'
+const IMAGERY_ATTRIBUTION = 'Imagery © <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics, and the GIS User Community'
+
+/**
+ * The two base maps (Esri, no API key needed), each a base layer and a labels layer that sits in its
+ * own pane above the data layers.
+ */
+const BASEMAPS = {
+  dark: () => [
+    L.tileLayer(`${ESRI}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
+      maxNativeZoom: 16,
+      maxZoom: 18,
+      attribution: ATTRIBUTION,
+      className: 'sg-basemap',
+    }),
+    L.tileLayer(`${ESRI}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+      maxNativeZoom: 16,
+      maxZoom: 18,
+      pane: 'labels',
+      opacity: 0.85,
+    }),
+  ],
+  satellite: () => [
+    L.tileLayer(`${ESRI_SERVICES}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, {
+      maxNativeZoom: 18,
+      maxZoom: 18,
+      attribution: IMAGERY_ATTRIBUTION,
+      className: 'sg-imagery',
+    }),
+    L.tileLayer(`${ESRI_SERVICES}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, {
+      maxNativeZoom: 18,
+      maxZoom: 18,
+      pane: 'labels',
+      opacity: 0.9,
+    }),
+  ],
+}
+export const BASEMAP_KINDS = Object.keys(BASEMAPS)
+
+/** Show the dark map ('dark') or satellite imagery ('satellite') under the data. */
+export function setBasemap(map, kind) {
+  const want = BASEMAPS[kind] ? kind : 'dark'
+  if (map._sgBasemap?.kind === want) return
+  for (const layer of map._sgBasemap?.layers ?? []) layer.remove()
+  const layers = BASEMAPS[want]()
+  for (const layer of layers) {
+    layer.addTo(map)
+    layer.bringToBack()
+  }
+  map._sgBasemap = { kind: want, layers }
+}
+
+/** A Leaflet map with zoom controls off and a labels pane; `basemap` is 'dark' (default) or 'satellite'. */
+export function createBaseMap(el, { interactive = true, basemap = 'dark' } = {}) {
   const map = L.map(el, {
     zoomControl: false,
     zoomSnap: 0.25,
@@ -20,18 +72,7 @@ export function createBaseMap(el, { interactive = true } = {}) {
   const labels = map.getPane('labels')
   labels.style.zIndex = 450
   labels.style.pointerEvents = 'none'
-  L.tileLayer(`${ESRI}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
-    maxNativeZoom: 16,
-    maxZoom: 18,
-    attribution: ATTRIBUTION,
-    className: 'sg-basemap',
-  }).addTo(map)
-  L.tileLayer(`${ESRI}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
-    maxNativeZoom: 16,
-    maxZoom: 18,
-    pane: 'labels',
-    opacity: 0.85,
-  }).addTo(map)
+  setBasemap(map, basemap)
   return map
 }
 
@@ -152,9 +193,10 @@ export function fireLabelIcon(fire) {
     className: '',
     iconSize: [0, 0],
     iconAnchor: [0, 0],
+    // a grid cell (wide views) has a detection count but no satellite passes
     html: `<div class="sg-label"><b>${esc(fire.name)}</b>${fire.frp == null ? 'FRP unknown' : `${Math.round(fire.frp)} MW`}${
       fire.fwi == null ? '' : ` · FWI ${fire.fwi}`
-    } · ${fire.persistence} passes</div>`,
+    } · ${fire.grid ? `${fire.count} detections` : `${fire.persistence} passes`}</div>`,
   })
 }
 

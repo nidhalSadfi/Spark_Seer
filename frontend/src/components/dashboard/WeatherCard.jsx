@@ -2,6 +2,7 @@ import { CloudRain, Droplets, Thermometer, Wind } from 'lucide-react'
 import { Badge, Skeleton } from '../ui/primitives'
 import { useWeather } from '../../hooks/useFireData'
 import { useFilters } from '../../context/FilterContext'
+import { ALL_AREAS } from '../../services/constants'
 import { MONTHS } from '../../utils/stats'
 import { fmtInt } from '../../utils/format'
 
@@ -25,9 +26,12 @@ export default function WeatherCard() {
   const { data, isLoading, error } = useWeather()
   const { aoi, region, areaName } = useFilters()
 
+  if (region === ALL_AREAS) {
+    return <p className="text-sm text-muted">The weather outlook is for one area at a time. Pick an area in the Area menu to see it.</p>
+  }
   if (isLoading) return <Skeleton className="h-36 w-full" />
-  if (error) {
-    return <p className="text-sm text-muted">Weather is unavailable right now: {error.message}</p>
+  if (error || !data) {
+    return <p className="text-sm text-muted">The weather outlook is not available right now. Try again in a few minutes.</p>
   }
 
   const hc = data.historical_context
