@@ -195,8 +195,21 @@ _REVIEWERS = {
                    "Decide, using the hard gate results, soft flags and affected (cy, cx, year, month) keys below "
                    "and the other reviewers' notes. The hard gates are enforced in code; your decision can only "
                    "keep or lower an approval. Use approve, hold (keep the results unpublished for a human) or "
-                   "reject. Give short reasons, and in flagged_keys only keys listed under affected_keys."),
+                   "reject. " + "{expected}" + " Give short reasons, and in flagged_keys only keys listed under "
+                   "affected_keys."),
 }
+# Spec §6: these soft flags are published with the row, so on their own they are no reason to hold.
+_EXPECTED_FLAGS = ("The soft flags partial, modis_partial and mixed_reference are expected in near-real-time "
+                   "runs: the current month is not over yet, the first month polled starts mid-month, and the "
+                   "month in which S-NPP ended mixes S-NPP with its NOAA successor as reference, by design. These rows are "
+                   "published with their flags, so these flags alone are not a reason to hold or reject. Hold or "
+                   "reject only for a real problem: implausible counts or drops, drift above its threshold, a "
+                   "drop share far above its recent level, or another reviewer's concrete concern.")
+_REVIEWERS["validation"] = (*_REVIEWERS["validation"][:2],
+                            _REVIEWERS["validation"][2].replace("{expected}", _EXPECTED_FLAGS))
+_REVIEWERS["harmonization"] = (*_REVIEWERS["harmonization"][:2], _REVIEWERS["harmonization"][2]
+                               + " Partial months and the mixed reference of the month S-NPP ended are expected; "
+                               "note them only if something about them looks wrong.")
 _COMMON_RULES = (" Quote numbers only exactly as the summary gives them and never compute new ones. "
                  "A detection is a satellite thermal hotspot, not one wildfire. Answer at once, in one reply.")
 _PAYLOAD_HEADER = "\n\nSummary (JSON):\n"

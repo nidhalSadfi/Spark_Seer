@@ -219,6 +219,9 @@ the current version's by more than `RECAL_TOLERANCE_PP` (default 0.5).
 - Output: a Pydantic verdict `{decision: approve | hold | reject, reasons: [str],
   flagged_keys: [(cy, cx, year, month)]}`. Agents receive summaries (counts, metrics, flagged
   keys), never raw detection rows, with a size cap.
+- The reviewers are told that `partial`, `modis_partial` and `mixed_reference` are expected in
+  near-real-time runs and published with the row (§6), so on their own they are no reason to hold
+  (decision 2026-11-15, after real runs held every partial month).
 - Final decision = deterministic hard gates AND verdict. The verdict can only downgrade
   (approve → hold or reject), never upgrade a failed gate. `hold` keeps the staging rows unpublished
   for review.
