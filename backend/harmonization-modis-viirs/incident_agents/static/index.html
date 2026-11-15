@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fire Incident Agents</title>
+<style>
+  :root { --bg:#f7f6f3; --panel:#fff; --ink:#1d1d1b; --muted:#6b6a65; --line:#e3e1db;
+          --accent:#c2410c; --ok:#15803d; --warn:#b45309; --err:#b91c1c; --info:#1d4ed8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151514; --panel:#1f1f1d; --ink:#ecebe7; --muted:#a3a29c; --line:#34332f;
+            --accent:#fb923c; --ok:#4ade80; --warn:#fbbf24; --err:#f87171; --info:#93c5fd; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:16px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns: minmax(280px, 380px) 1fr; gap:16px; padding:16px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px; }
+  textarea, input, select, button { font:inherit; color:inherit; }
+  textarea { width:100%; min-height:72px; padding:8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  input, select { padding:6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); width:auto; }
+  button { padding:7px 12px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.5; cursor:wait; }
+  #steps { max-height:46vh; overflow:auto; font:12px/1.4 ui-monospace, Consolas, monospace; }
+  .ev { padding:3px 0; border-bottom:1px dashed var(--line); display:grid; grid-template-columns: 60px 1fr; column-gap:6px; }
+  .ev span:last-child { grid-column: 2; overflow-wrap:anywhere; }
+  .ev .t { color:var(--muted); } .s-ok,.s-done,.s-created { color:var(--ok); } .s-error { color:var(--err); }
+  .s-retry,.s-warning,.s-skipped { color:var(--warn); } .s-running,.s-started,.s-progress,.s-updated { color:var(--info); }
+  .ticket { border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:10px; }
+  .ticket h3 { margin:0 0 4px; font-size:15px; }
+  .meta { color:var(--muted); font-size:12px; }
+  .badge { display:inline-block; padding:1px 7px; border-radius:99px; font-size:11px; border:1px solid currentColor; margin-right:6px; }
+  .b-overlap { color:var(--ok); } .b-none { color:var(--warn); } .b-mentioned { color:var(--muted); }
+  table { width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
+  td, th { text-align:left; padding:4px 6px; border-top:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  a { color:var(--accent); word-break:break-all; }
+  .sched { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-top:1px solid var(--line); font-size:12px; }
+  .note { font-size:12px; color:var(--muted); margin-top:8px; }
+  .b-replay { color:var(--info); }
+  .ticket.replay { border-style:dashed; }
+  .extra { font-size:12px; margin-top:4px; }
+  .extra b { font-weight:600; }
+  .period { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .period .plabel { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .period label { display:flex; gap:5px; align-items:center; cursor:pointer; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fire incident agents</h1>
+  <p>Unverified public mentions, checked against satellite data. Not an official alert system: follow your civil-protection authority.</p>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Search</h2>
+      <textarea id="q" placeholder="e.g. France, or: forest fires in Kabylie and Tizi Ouzou, or: Var and Bouches-du-Rhône">France</textarea>
+      <div class="period" role="radiogroup" aria-label="Period">
+        <span class="plabel">Period</span>
+        <label><input type="radio" name="period" value="recent" checked> Recent hours</label>
+        <label><input type="radio" name="period" value="past"> Past dates</label>
+      </div>
+      <div id="recent">
+        <div class="row">
+          <label>Last <select id="hours"><option>6</option><option>12</option><option selected>24</option><option>48</option><option>72</option></select> hours</label>
+        </div>
+      </div>
+      <div id="past" hidden>
+        <div class="row">
+          <label>From <input id="rfrom" type="date" min="2026-08-03" value="2026-08-26"></label>
+          <label>To <input id="rto" type="date" min="2026-08-03" value="2026-08-29"></label>
+        </div>
+        <p class="note">Any dates from 3 Aug 2026 (start of Kanari's fire archive) to yesterday, up to 31 days. The run starts from the fires the satellites saw in those dates and searches posts around each one. These tickets get a Replay badge and never mix with live ones.</p>
+      </div>
+      <div class="row"><button id="run">Run now</button></div>
+      <div class="row" id="schedrow">
+        <label>Every <input id="every" type="number" min="15" value="60" style="width:70px"> min</label>
+        <button class="ghost" id="sched">Schedule</button>
+      </div>
+      <div id="schedules"></div>
+      <p class="note">Satellite data and verified signals: Source: <a href="https://kanari.io" target="_blank" rel="noopener">kanari.io</a> (CC BY 4.0), NASA FIRMS.</p>
+    </section>
+    <section style="margin-top:16px">
+      <h2>Steps</h2>
+      <div id="steps"></div>
+    </section>
+  </div>
+  <section>
+    <h2>Tickets</h2>
+    <div id="tickets"><p class="meta">No tickets yet.</p></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safeUrl = (u) => /^https?:\/\//i.test(u || "") ? u : "#";
+let es;
+
+function addEvent(e) {
+  const d = document.createElement("div");
+  d.className = "ev";
+  const tag = e.source ? `${e.step}/${e.source}` : e.step;
+  d.innerHTML = `<span class="t">${esc((e.ts||"").slice(11,19))}</span><span class="s-${esc(e.status)}">${esc(tag)} · ${esc(e.status)}</span><span>${e.run_id ? "#"+esc(e.run_id)+" " : ""}${esc(e.message)}</span>`;
+  const box = $("steps"); box.appendChild(d); box.scrollTop = box.scrollHeight;
+  if (["ticket","satellite","history","lead"].includes(e.step) || (e.step === "run" && ["done","error"].includes(e.status))) loadTickets();
+  if (e.step === "run" && ["done","error"].includes(e.status)) { $("run").disabled = false; }
+}
+
+function listen(after) {
+  if (es) es.close();
+  es = new EventSource(`/api/events/stream?after=${after}`);
+  es.onmessage = (m) => addEvent(JSON.parse(m.data));
+}
+
+const fmtMin = (m) => m >= 120 ? `${(m/60).toFixed(1)} h` : `${m} min`;
+const signed = (m) => m == null ? null : (m > 0 ? `posts ${fmtMin(m)} before` : m < 0 ? `satellite ${fmtMin(-m)} before` : "same time");
+function leadLine(t) {
+  const l = t.satellite && t.satellite.lead;
+  if (!l) return "";
+  const parts = [];
+  if (l.minutes_vs_kanari != null) parts.push(`vs Kanari first detection: <b>${esc(signed(l.minutes_vs_kanari))}</b>`);
+  if (l.minutes_vs_polar != null) parts.push(`vs first FIRMS pass: <b>${esc(signed(l.minutes_vs_polar))}</b>`);
+  const cut = l.posts_truncated ? ' <span class="meta">(post search hit its page limit: people may have posted even earlier)</span>' : "";
+  return `<div class="extra">Lead time (first post ${esc(l.social_first)}): ${parts.join(" · ")}${cut}</div>`;
+}
+function historyLine(t) {
+  return t.history ? `<div class="extra">History: ${esc(t.history.text)} <span class="meta">cell ${esc(t.history.cell_id)}</span></div>` : "";
+}
+
+function badge(st) {
+  const cls = st === "Satellite overlap" ? "b-overlap" : st === "No satellite support" ? "b-none" : "b-mentioned";
+  return `<span class="badge ${cls}">${esc(st)}</span>`;
+}
+
+async function loadTickets() {
+  const ts = await (await fetch("/api/tickets")).json();
+  if (!ts.length) { $("tickets").innerHTML = '<p class="meta">No tickets yet.</p>'; return; }
+  $("tickets").innerHTML = ts.map(t => {
+    const sat = t.satellite && t.satellite.matches && t.satellite.matches.length
+      ? `<div class="meta">Satellite: ${t.satellite.matches.slice(0,3).map(m => `${esc(m.source)} ${esc(m.place || m.sensor || "")} ${m.km != null ? esc(m.km)+" km" : ""} ${esc(m.last_seen || m.acq_date || "")}`).join(" · ")}</div>`
+      : (t.satellite ? `<div class="meta">Satellite checked (${esc((t.satellite.checked||[]).join(", ") || "none")}), radius ${esc(t.satellite.radius_km)} km: nothing found — not evidence of no fire.</div>` : "");
+    const rows = t.sources.map(s => `<tr><td>${esc(s.source)}</td><td>${esc(s.published_at)}</td><td>${esc(s.fetched_at)}</td><td><a href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">${esc(s.url)}</a><div class="meta">${esc(s.excerpt)}</div></td></tr>`).join("");
+    const rp = t.mode === "replay";
+    return `<div class="ticket${rp ? " replay" : ""}"><h3>#${esc(t.id)} ${esc(t.title)}</h3>
+      <div class="meta">${rp ? '<span class="badge b-replay">Replay</span>' : ""}${badge(t.status)}${esc(t.country)} · ${esc(t.lat?.toFixed(3))}, ${esc(t.lon?.toFixed(3))} · ${esc(t.precision)} ±${esc(t.radius_km)} km · ${esc(t.first_seen)} → ${esc(t.last_seen)}</div>
+      ${sat}${leadLine(t)}${historyLine(t)}
+      <table><tr><th>Source</th><th>Published</th><th>Fetched</th><th>Link</th></tr>${rows}</table></div>`;
+  }).join("");
+}
+
+async function loadSchedules() {
+  const ss = await (await fetch("/api/schedules")).json();
+  $("schedules").innerHTML = ss.map(s => `<div class="sched"><span>“${esc(s.query)}” every ${esc(s.interval_min)} min, last ${esc(s.hours)} h · next ${esc(s.next_run_at)}</span><button class="ghost" data-del="${esc(s.id)}">Remove</button></div>`).join("");
+  $("schedules").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { await fetch(`/api/schedules/${b.dataset.del}`, {method:"DELETE"}); loadSchedules(); });
+}
+
+const period = () => document.querySelector('input[name="period"]:checked').value;
+function showPeriod() {
+  const past = period() === "past";
+  $("recent").hidden = past; $("past").hidden = !past; $("schedrow").hidden = past;
+  $("run").textContent = past ? "Run on these dates" : "Run now";
+}
+document.querySelectorAll('input[name="period"]').forEach(r => r.onchange = showPeriod);
+const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+$("rfrom").max = yesterday; $("rto").max = yesterday;
+
+$("run").onclick = async () => {
+  let body = {query: $("q").value, hours: +$("hours").value};
+  if (period() === "past") {
+    if (!$("rfrom").value || !$("rto").value) { alert("Pick both dates"); return; }
+    if ($("rfrom").value > $("rto").value) { alert("'From' must be on or before 'To'"); return; }
+    body = {query: $("q").value, replay_from: $("rfrom").value, replay_to: $("rto").value};
+  }
+  $("run").disabled = true;
+  const r = await fetch("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  if (!r.ok) { $("run").disabled = false; const d = (await r.json()).detail; alert(typeof d === "string" ? d : JSON.stringify(d)); }
+};
+$("sched").onclick = async () => {
+  await fetch("/api/schedules", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query:$("q").value, hours:+$("hours").value, interval_min:+$("every").value})});
+  loadSchedules();
+};
+
+(async () => {
+  listen(0);
+  loadTickets(); loadSchedules();
+})();
+</script>
+</body>
+</html>
