@@ -3,6 +3,11 @@
 Run:  uvicorn api.main:app --reload --port 8000
 Call: GET /calendar?bbox=8.0,35.0,11.0,37.5          (minLon,minLat,maxLon,maxLat)
       GET /calendar?area=bizerte                     (ids from GET /areas)
+
+With DATABASE_URL set, /calendar reads the approved cell_month table (api/core.py) and the
+database endpoints work: /processing/* (api/processing_status.py), /fires/live (api/fires.py),
+/reports (api/reports.py). Without a usable database those answer 503 and the calendar endpoints
+keep serving the parquet file. This process never imports worker, crewai or an LLM client (I1).
 """
 import importlib.util
 import logging
@@ -15,7 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import core
+from api import core, database
+from api.fires import router as fires_router
+from api.processing_status import router as processing_router
+from api.reports import router as reports_router
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
@@ -23,9 +31,15 @@ METEO_DIR = ROOT / "meteomatics-weather"
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI(title="EmberLedger")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+# The reports page sends PATCH/DELETE with an X-Admin-Token header ("*" headers covers it).
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "PATCH", "DELETE"],
+                   allow_headers=["*"])
 # Static files: the demo page (web/demo/) and the offline backups (web/backup/).
 app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
+
+app.include_router(processing_router)
+app.include_router(fires_router)
+app.include_router(reports_router)
 
 # Teammate routers (api/passport.py, api/weather.py): optional, so the app starts without them.
 try:
@@ -74,6 +88,11 @@ def missing_data(request, exc):
     return JSONResponse(status_code=503, content={"detail": f"data file not found: {exc.filename or exc}"})
 
 
+@app.exception_handler(database.DatabaseUnavailable)
+def database_unavailable(request, exc):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
 @app.get("/", include_in_schema=False)
 def root():
     return RedirectResponse("/web/demo/")  # a browser on the base URL gets the demo (API docs: /docs)
@@ -81,7 +100,8 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "data_file": core.data_path(), "rows": len(core.get_data())}
+    rows = len(core.get_data())
+    return {"status": "ok", "data_file": core.data_path(), "rows": rows, **core.data_source()}
 
 
 @app.get("/areas")
@@ -104,10 +124,7 @@ def calendar(bbox: str | None = None, area: str | None = None, start: int = 2001
             raise HTTPException(400, f"unknown area '{area}', see GET /areas")
         return core.calendar_for_bbox(tuple(found["bbox"]), start, end)
     try:
-        x0, y0, x1, y1 = map(float, bbox.split(","))
-    except ValueError:
-        raise HTTPException(400, "bbox must be minLon,minLat,maxLon,maxLat")
-    if not (x0 <= x1 and y0 <= y1):  # also catches NaN; such a box would silently select nothing
-        raise HTTPException(400, "bbox needs minLon <= maxLon and minLat <= maxLat; "
-                                 "a box across the antimeridian (180 degrees) must be sent as two boxes")
-    return core.calendar_for_bbox((x0, y0, x1, y1), start, end)
+        box = core.parse_bbox(bbox)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return core.calendar_for_bbox(box, start, end)

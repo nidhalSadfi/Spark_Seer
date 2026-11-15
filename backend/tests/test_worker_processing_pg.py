@@ -128,7 +128,7 @@ def test_migration_0002_up_and_down(pg):
     assert PHASE4_TABLES <= tables()
     assert {"decision", "calibration_version_id", "detections_count", "staged_count", "dataset_version_id",
             "ai_review", "affected_count"} <= job_columns()
-    assert "community_reports" not in tables()  # owned by another phase's migration
+    assert "community_reports" in tables()  # migration 0003 (Phase 5), chained after 0002; see test_api_pg
     fks = {r.conname for r in rows(pg.engine, "SELECT conname FROM pg_constraint c JOIN pg_namespace n "
                                               "ON n.oid = c.connamespace WHERE n.nspname = :s AND contype = 'f'",
                                    s=pg.schema)}

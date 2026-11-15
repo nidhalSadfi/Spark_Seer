@@ -97,13 +97,17 @@ def test_app_starts_without_teammate_routers(monkeypatch):
         importlib.reload(api.main)  # back to the app with the real routers
 
 
-def test_cors_allows_get_and_post_from_any_origin(client):
-    for method in ["GET", "POST"]:
-        r = client.options("/calendar", headers={"Origin": "https://example.org",
-                                                 "Access-Control-Request-Method": method})
-        assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
+def test_cors_allows_the_frontend_methods_and_admin_header_from_any_origin(client):
+    # The reports page sends PATCH/DELETE with X-Admin-Token (spec §10 amendment 2026-11-15).
+    for method in ["GET", "POST", "PATCH", "DELETE"]:
+        r = client.options("/reports/x", headers={"Origin": "https://example.org",
+                                                  "Access-Control-Request-Method": method,
+                                                  "Access-Control-Request-Headers": "x-admin-token,content-type"})
+        assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*", method
+        assert method in r.headers["access-control-allow-methods"]
+        assert "x-admin-token" in r.headers["access-control-allow-headers"].lower()
     r = client.options("/calendar", headers={"Origin": "https://example.org",
-                                             "Access-Control-Request-Method": "DELETE"})
+                                             "Access-Control-Request-Method": "PUT"})
     assert r.status_code == 400
 
 
