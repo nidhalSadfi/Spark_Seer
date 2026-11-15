@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 420" width="1100" height="420" role="img" aria-label="Held-out test error of the harmonization">
+<rect width="1100" height="420" rx="16" fill="#0b1220"/>
+<text x="40" y="44" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#e5e7eb">Harmonization cuts the MODIS ↔ VIIRS mismatch from 76 % to 5.4 %</text>
+<text x="40" y="70" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#9ca3af">Error on held-out test years · lower is better</text>
+<line x1="330.0" y1="90" x2="330.0" y2="344" stroke="#1f2a40"/>
+<text x="330.0" y="374" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#6b7280">0 %</text>
+<line x1="500.0" y1="90" x2="500.0" y2="344" stroke="#1f2a40"/>
+<text x="500.0" y="374" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#6b7280">20 %</text>
+<line x1="670.0" y1="90" x2="670.0" y2="344" stroke="#1f2a40"/>
+<text x="670.0" y="374" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#6b7280">40 %</text>
+<line x1="840.0" y1="90" x2="840.0" y2="344" stroke="#1f2a40"/>
+<text x="840.0" y="374" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#6b7280">60 %</text>
+<line x1="1010.0" y1="90" x2="1010.0" y2="344" stroke="#1f2a40"/>
+<text x="1010.0" y="374" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#6b7280">80 %</text>
+<text x="314" y="118.0" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#e5e7eb">No harmonization (raw MODIS vs VIIRS)</text>
+<path d="M330,96 h642.0 a4,4 0 0 1 4,4 v26 a4,4 0 0 1 -4,4 h-642.0 z" fill="#4b5563"><title>No harmonization (raw MODIS vs VIIRS): 76.0 %</title></path>
+<text x="986.0" y="118.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e5e7eb">76 %</text>
+<text x="314" y="170.0" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#e5e7eb">Harmonized, weakest band (30–60°S)</text>
+<path d="M330,148 h96.3 a4,4 0 0 1 4,4 v26 a4,4 0 0 1 -4,4 h-96.3 z" fill="#ea580c"><title>Harmonized, weakest band (30–60°S): 11.8 %</title></path>
+<text x="440.3" y="170.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e5e7eb">11.8 %</text>
+<text x="314" y="222.0" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#e5e7eb">Harmonized, per continent (worst)</text>
+<path d="M330,200 h71.7 a4,4 0 0 1 4,4 v26 a4,4 0 0 1 -4,4 h-71.7 z" fill="#ea580c"><title>Harmonized, per continent (worst): 8.9 %</title></path>
+<text x="415.6" y="222.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e5e7eb">8.9 %</text>
+<text x="314" y="274.0" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#e5e7eb">Harmonized, whole world</text>
+<path d="M330,252 h41.9 a4,4 0 0 1 4,4 v26 a4,4 0 0 1 -4,4 h-41.9 z" fill="#ea580c"><title>Harmonized, whole world: 5.4 %</title></path>
+<text x="385.9" y="274.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e5e7eb">5.4 %</text>
+<text x="314" y="326.0" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#e5e7eb">S-NPP → NOAA-20 hand-over</text>
+<path d="M330,304 h12.1 a4,4 0 0 1 4,4 v26 a4,4 0 0 1 -4,4 h-12.1 z" fill="#ea580c"><title>S-NPP → NOAA-20 hand-over: 1.9 %</title></path>
+<text x="356.1" y="326.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e5e7eb">1.9 %</text>
+<text x="40" y="402" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">Calibration fitted 2012–2019, tested 2020–2021. Hand-over: r = 1.017, 1.9 % vs 2.3 % uncorrected. Full tables: backend/data/world/VALIDATION.md</text>
+</svg>
