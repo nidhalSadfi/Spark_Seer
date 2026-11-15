@@ -1,4 +1,4 @@
-"""Weather context: GET /weather?area=<id>.
+"""Weather context: GET /weather?area=<id>  or  GET /weather?lat=<deg>&lon=<deg>.
 
 Context only. This is not an official fire-danger index and not an ignition
 probability. Values come straight from the Open-Meteo forecast API.
@@ -86,15 +86,58 @@ def historical_context(bbox: list[float], month: int) -> dict:
     }
 
 
+POINT_HALF_WIDTH_DEG = 0.05  # context box around a point: small enough to select just the grid cell(s) it sits in
+POINT_ROUND_DP = 2           # ~1 km: nearby lookups share one cached forecast
+
+
+def containing_area(lat: float, lon: float) -> dict | None:
+    """The named demo area (data/areas.json) that contains this point, if any."""
+    try:
+        areas = pp.load_areas()
+    except HTTPException:
+        return None
+    for a in areas:
+        min_lon, min_lat, max_lon, max_lat = a["bbox"]
+        if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+            return {"id": a["id"], "name": a.get("name", a["id"]), "bbox": a["bbox"]}
+    return None
+
+
 @router.get("/weather")
-def weather(area: str = Query(..., description="Area id from data/areas.json")) -> dict:
+def weather(
+    area: str | None = Query(None, description="Area id from data/areas.json"),
+    lat: float | None = Query(None, description="Latitude of a point (use together with lon, instead of area)"),
+    lon: float | None = Query(None, description="Longitude of a point (use together with lat, instead of area)"),
+) -> dict:
+    """Weather context for a named area (its bbox centre) or for any point given as lat + lon."""
+    by_point = lat is not None or lon is not None
+    if by_point == (area is not None):
+        raise HTTPException(400, "give exactly one of area=<id> or lat=<deg>&lon=<deg>")
+    if by_point:
+        if lat is None or lon is None:
+            raise HTTPException(400, "lat and lon must be given together")
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise HTTPException(422, "lat must be in [-90, 90] and lon in [-180, 180].")
+        lat, lon = round(lat, POINT_ROUND_DP), round(lon, POINT_ROUND_DP)
+        key = f"pt:{lat},{lon}"
+    else:
+        key = area
+
     now = time.time()
-    hit = _cache.get(area)
+    hit = _cache.get(key)
     if hit and now - hit[0] < CACHE_TTL_S:
         return hit[1]
 
-    a = pp.find_area(area)
-    lat, lon = bbox_centre(a["bbox"])
+    if by_point:
+        found = containing_area(lat, lon)
+        h = POINT_HALF_WIDTH_DEG
+        context_bbox = [round(lon - h, 4), round(lat - h, 4), round(lon + h, 4), round(lat + h, 4)]
+    else:
+        found = pp.find_area(area)
+        lat, lon = bbox_centre(found["bbox"])
+        context_bbox = found["bbox"]
+        found = {"id": found["id"], "name": found.get("name", found["id"]), "bbox": found["bbox"]}
+
     try:
         data = fetch_forecast(lat, lon)
         days = summarise_daily(data)
@@ -104,7 +147,9 @@ def weather(area: str = Query(..., description="Area id from data/areas.json")) 
 
     current_month = datetime.now(ZoneInfo(TZ)).month
     payload = {
-        "area": {"id": a["id"], "name": a.get("name", a["id"]), "bbox": a["bbox"]},
+        # `area` is the named area (null when a point lies outside every named area).
+        "area": found,
+        "scope": "point" if by_point else "area",
         "point": {"latitude": lat, "longitude": lon},
         "label": LABEL,
         "source": "Open-Meteo forecast API",
@@ -113,7 +158,7 @@ def weather(area: str = Query(..., description="Area id from data/areas.json")) 
         "forecast_issue_time_note": ISSUE_TIME_NOTE,
         "timezone": TZ,
         "days": days,
-        "historical_context": historical_context(a["bbox"], current_month),
+        "historical_context": historical_context(context_bbox, current_month),
     }
-    _cache[area] = (now, payload)
+    _cache[key] = (now, payload)
     return payload

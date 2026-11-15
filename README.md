@@ -163,7 +163,7 @@ or removed, only added to. Example values below are real (the committed data) un
 | `GET /calendar` | Monthly harmonized burning-activity calendar for a bbox or an area |
 | `GET /validation` | Held-out validation report of the MODIS->VIIRS harmonization |
 | `POST /investigate` | Evidence Passport for one area and month (`api/passport.py`, teammate) |
-| `GET /weather?area=<id>` | 3-day Open-Meteo weather context plus historical context (`api/weather.py`, teammate) |
+| `GET /weather?area=<id>` or `?lat=&lon=` | 3-day Open-Meteo weather context plus historical context, for a named area or any point (`api/weather.py`, teammate) |
 | `GET /meteomatics/weather?area=<id>` | Meteomatics 72 h forecast at a named point (`meteomatics-weather/`, teammate) |
 | `GET /meteomatics/weather/map?window=0..2&variable=` | Forecast GeoJSON for the 35-cell grid, one 24 h window |
 | `GET /meteomatics/weather/grid-meta` | Grid geometry and bounds (works without a forecast) |
